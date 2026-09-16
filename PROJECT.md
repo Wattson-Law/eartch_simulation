@@ -186,6 +186,7 @@ AI 只把自然语言转成合法的结构化事件，再由模拟器执行。�
 | 13:38 | 启动 Cloud Agent 实现第 1–2 天 | 阻塞中（套餐无 Cloud Agents；仓库已就绪） |
 | 13:43 | 用户提供仓库 https://github.com/Wattson-Law/eartch_simulation.git | 完成 |
 | 13:48 | Bot 本机完成 Day1–2 MVP（构建通过），交付 zip 供用户推送 | 完成 |
+| 13:59 | Bot 经 gh 授权后推送 MVP 至仓库 main | 完成 |
 
 ### 本轮实现目标（第 1–2 天）
 
@@ -200,5 +201,6 @@ AI 只把自然语言转成合法的结构化事件，再由模拟器执行。�
 - 仓库：https://github.com/Wattson-Law/eartch_simulation.git
 - Cloud Agents 不可用（套餐限制）；已改由 Bot 本机脚手架交付。
 - 交付物：`/workspace/xiao-diqiu/eartch_simulation-mvp.zip`（无 node_modules，构建已通过）。
-- 待用户：解压后推送到上述仓库；本地 `npm install && npm run dev` 验证。
+- 已推送到 GitHub main：https://github.com/Wattson-Law/eartch_simulation （commit feat Day1-2 MVP）
+- 待用户：本地 `npm install && npm run dev` 验证。
 
