@@ -138,7 +138,7 @@
 
 .eco-scene-canvas {
   width: 100%;
-  height: 160px;
+  height: 200px;
   border-radius: 12px;
   display: block;
   background: #e3f2fd;
@@ -198,6 +198,15 @@
 
 .species-icon {
   font-size: 1.4rem;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.species-thumb {
+  max-width: 40px;
+  max-height: 28px;
 }
 
 .species-label {
@@ -460,6 +469,11 @@
   left: -40px;
   top: 28px;
   animation: wolf-rush 1.4s ease-out forwards;
+}
+
+.predation-sprite {
+  display: block;
+  font-size: 0;
 }
 
 .predation-prey {

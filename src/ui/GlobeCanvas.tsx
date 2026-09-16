@@ -1,14 +1,21 @@
 import { useEffect, useRef } from 'react';
+import {
+  PLANET_EARTH,
+  PIXEL_EARTH_FRAME_COUNT,
+  loadImage,
+  pixelEarthFrame,
+} from '../assetsPaths';
 
 interface Props {
   onEnterYellowstone: () => void;
 }
 
-/** Canvas 2D 扁平小地球：自转 + 黄石热点可点 */
+/** Canvas 2D 扁平小地球：Kenney 贴图自转 + 黄石热点可点 */
 export function GlobeCanvas({ onEnterYellowstone }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const angleRef = useRef(0);
   const hoverHotRef = useRef(false);
+  const frameRef = useRef(0);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -17,7 +24,26 @@ export function GlobeCanvas({ onEnterYellowstone }: Props) {
     if (!ctx) return;
 
     let raf = 0;
+    let cancelled = false;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+    const kenney = { img: null as HTMLImageElement | null };
+    const pixelFrames: HTMLImageElement[] = [];
+
+    void (async () => {
+      try {
+        kenney.img = await loadImage(PLANET_EARTH);
+      } catch {
+        /* fallback below */
+      }
+      const loads = Array.from({ length: PIXEL_EARTH_FRAME_COUNT }, (_, i) =>
+        loadImage(pixelEarthFrame(i + 1)).catch(() => null),
+      );
+      const imgs = await Promise.all(loads);
+      for (const im of imgs) {
+        if (im) pixelFrames.push(im);
+      }
+    })();
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
@@ -28,35 +54,7 @@ export function GlobeCanvas({ onEnterYellowstone }: Props) {
     resize();
     window.addEventListener('resize', resize);
 
-    const draw = () => {
-      const rect = canvas.getBoundingClientRect();
-      const w = rect.width;
-      const h = rect.height;
-      const cx = w / 2;
-      const cy = h / 2 - 10;
-      const r = Math.min(w, h) * 0.32;
-
-      ctx.clearRect(0, 0, w, h);
-
-      // 背景星点
-      ctx.fillStyle = '#0b1220';
-      ctx.fillRect(0, 0, w, h);
-      for (let i = 0; i < 40; i++) {
-        const sx = (Math.sin(i * 12.3 + angleRef.current * 0.2) * 0.5 + 0.5) * w;
-        const sy = (Math.cos(i * 7.1) * 0.5 + 0.5) * h;
-        ctx.fillStyle = `rgba(255,255,255,${0.2 + (i % 5) * 0.1})`;
-        ctx.beginPath();
-        ctx.arc(sx, sy, 1.2, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      // 地球阴影
-      ctx.beginPath();
-      ctx.arc(cx + 6, cy + 10, r * 1.05, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(0,0,0,0.25)';
-      ctx.fill();
-
-      // 海洋
+    const drawProceduralFallback = (cx: number, cy: number, r: number) => {
       const ocean = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.2, cx, cy, r);
       ocean.addColorStop(0, '#5ec8e8');
       ocean.addColorStop(1, '#2a6f9e');
@@ -65,12 +63,10 @@ export function GlobeCanvas({ onEnterYellowstone }: Props) {
       ctx.fillStyle = ocean;
       ctx.fill();
 
-      // 大陆色块（扁平，随角度旋转）
       ctx.save();
       ctx.beginPath();
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.clip();
-
       const a = angleRef.current;
       const lands = [
         { dx: -0.35, dy: -0.1, rw: 0.45, rh: 0.35, color: '#7cbc4a' },
@@ -86,11 +82,42 @@ export function GlobeCanvas({ onEnterYellowstone }: Props) {
         ctx.fillStyle = land.color;
         ctx.fill();
       }
+      ctx.restore();
+    };
 
-      // 黄石热点（北美大致位置，随旋转显隐）
-      const hotAngle = a + 0.6;
+    const drawEarth = (cx: number, cy: number, r: number) => {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.clip();
+
+      if (kenney.img?.complete && kenney.img.naturalWidth > 0) {
+        ctx.translate(cx, cy);
+        ctx.rotate(angleRef.current * 0.35);
+        const size = r * 2.15;
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(kenney.img, -size / 2, -size / 2, size, size);
+      } else if (pixelFrames.length > 0) {
+        const fi = Math.floor(frameRef.current) % pixelFrames.length;
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(pixelFrames[fi], cx - r, cy - r, r * 2, r * 2);
+      } else {
+        ctx.restore();
+        drawProceduralFallback(cx, cy, r);
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.clip();
+      }
+
+      const hotAngle = angleRef.current + 0.6;
       const visible = Math.cos(hotAngle) > -0.15;
       if (visible) {
+        // 热点坐标基于未旋转的屏幕空间：取消旋转变换后画
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.clip();
         const hx = cx + Math.sin(hotAngle) * r * 0.55;
         const hy = cy - r * 0.18;
         const pulse = 1 + Math.sin(performance.now() / 400) * 0.08;
@@ -101,7 +128,6 @@ export function GlobeCanvas({ onEnterYellowstone }: Props) {
         ctx.strokeStyle = '#fff3e0';
         ctx.lineWidth = 2;
         ctx.stroke();
-
         ctx.font = '12px system-ui, sans-serif';
         ctx.fillStyle = '#fff8e1';
         ctx.textAlign = 'center';
@@ -109,15 +135,44 @@ export function GlobeCanvas({ onEnterYellowstone }: Props) {
         ctx.fillText('点击进入', hx, hy + 26);
       }
       ctx.restore();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
 
-      // 边缘描边
+    const draw = () => {
+      if (cancelled) return;
+      const rect = canvas.getBoundingClientRect();
+      const w = rect.width;
+      const h = rect.height;
+      const cx = w / 2;
+      const cy = h / 2 - 10;
+      const r = Math.min(w, h) * 0.32;
+
+      ctx.clearRect(0, 0, w, h);
+
+      ctx.fillStyle = '#0b1220';
+      ctx.fillRect(0, 0, w, h);
+      for (let i = 0; i < 40; i++) {
+        const sx = (Math.sin(i * 12.3 + angleRef.current * 0.2) * 0.5 + 0.5) * w;
+        const sy = (Math.cos(i * 7.1) * 0.5 + 0.5) * h;
+        ctx.fillStyle = `rgba(255,255,255,${0.2 + (i % 5) * 0.1})`;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 1.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.beginPath();
+      ctx.arc(cx + 6, cy + 10, r * 1.05, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.fill();
+
+      drawEarth(cx, cy, r);
+
       ctx.beginPath();
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.strokeStyle = 'rgba(255,255,255,0.35)';
       ctx.lineWidth = 3;
       ctx.stroke();
 
-      // 标题
       ctx.fillStyle = '#e8f4ff';
       ctx.font = 'bold 22px "Segoe UI", system-ui, sans-serif';
       ctx.textAlign = 'center';
@@ -127,6 +182,7 @@ export function GlobeCanvas({ onEnterYellowstone }: Props) {
       ctx.fillText('我做了一个存活在电脑里的地球', cx, 56);
 
       angleRef.current += 0.008;
+      frameRef.current += 0.12;
       raf = requestAnimationFrame(draw);
     };
 
@@ -166,7 +222,6 @@ export function GlobeCanvas({ onEnterYellowstone }: Props) {
       const y = e.clientY - rect.top;
       const dx = x - cx;
       const dy = y - cy;
-      // 单击地球表面或热点均可进入
       if (dx * dx + dy * dy <= r * r || hitTest(e.clientX, e.clientY)) {
         onEnterYellowstone();
       }
@@ -176,6 +231,7 @@ export function GlobeCanvas({ onEnterYellowstone }: Props) {
     canvas.addEventListener('click', onClick);
 
     return () => {
+      cancelled = true;
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', resize);
       canvas.removeEventListener('mousemove', onMove);

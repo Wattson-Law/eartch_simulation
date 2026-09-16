@@ -1,17 +1,53 @@
 import type { EcosystemState } from '../sim/types';
 import { SEASON_LABELS } from '../sim/types';
+import { ANIMAL_SHEETS } from '../assetsPaths';
 
 interface Props {
   state: EcosystemState;
 }
 
+type Row = {
+  label: string;
+  value: number;
+  color: string;
+  emoji?: string;
+  sheet?: { src: string; frameW: number; frameH: number };
+};
+
 export function SpeciesPanel({ state }: Props) {
-  const rows = [
-    { icon: '🌿', label: '草', value: Math.round(state.grass), color: '#66bb6a' },
-    { icon: '🌳', label: '灌木', value: Math.round(state.shrubs), color: '#9ccc65' },
-    { icon: '🐇', label: '兔子', value: Math.round(state.rabbits), color: '#ffb74d' },
-    { icon: '🦌', label: '麋鹿', value: Math.round(state.elk), color: '#8d6e63' },
-    { icon: '🐺', label: '狼', value: Math.round(state.wolves), color: '#78909c' },
+  const rows: Row[] = [
+    { emoji: '🌿', label: '草', value: Math.round(state.grass), color: '#66bb6a' },
+    { emoji: '🌳', label: '灌木', value: Math.round(state.shrubs), color: '#9ccc65' },
+    {
+      label: '兔子',
+      value: Math.round(state.rabbits),
+      color: '#ffb74d',
+      sheet: {
+        src: ANIMAL_SHEETS.rabbitIdle.src,
+        frameW: ANIMAL_SHEETS.rabbitIdle.frameW,
+        frameH: ANIMAL_SHEETS.rabbitIdle.frameH,
+      },
+    },
+    {
+      label: '麋鹿',
+      value: Math.round(state.elk),
+      color: '#8d6e63',
+      sheet: {
+        src: ANIMAL_SHEETS.deerIdle.src,
+        frameW: ANIMAL_SHEETS.deerIdle.frameW,
+        frameH: ANIMAL_SHEETS.deerIdle.frameH,
+      },
+    },
+    {
+      label: '狼',
+      value: Math.round(state.wolves),
+      color: '#78909c',
+      sheet: {
+        src: ANIMAL_SHEETS.wolfHowl.src,
+        frameW: ANIMAL_SHEETS.wolfHowl.frameW,
+        frameH: ANIMAL_SHEETS.wolfHowl.frameH,
+      },
+    },
   ];
 
   return (
@@ -28,7 +64,27 @@ export function SpeciesPanel({ state }: Props) {
       <div className="species-grid">
         {rows.map((r) => (
           <div key={r.label} className="species-card" style={{ borderColor: r.color }}>
-            <div className="species-icon">{r.icon}</div>
+            <div className="species-icon">
+              {r.sheet ? (
+                <span
+                  className="species-thumb"
+                  style={{
+                    width: Math.min(36, r.sheet.frameW),
+                    height: Math.min(28, r.sheet.frameH),
+                    backgroundImage: `url(${r.sheet.src})`,
+                    backgroundRepeat: 'no-repeat',
+                    backgroundSize: 'auto 100%',
+                    backgroundPosition: '0 0',
+                    imageRendering: 'pixelated',
+                    display: 'inline-block',
+                  }}
+                  role="img"
+                  aria-label={r.label}
+                />
+              ) : (
+                r.emoji
+              )}
+            </div>
             <div className="species-label">{r.label}</div>
             <div className="species-value">{r.value}</div>
           </div>
