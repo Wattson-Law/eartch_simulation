@@ -492,3 +492,29 @@
   60% { right: 20px; opacity: 1; }
   100% { right: -30px; opacity: 0; }
 }
+
+
+.globe-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px 16px;
+}
+
+.enter-btn {
+  appearance: none;
+  border: none;
+  cursor: pointer;
+  background: linear-gradient(135deg, #ff8a65, #ff7043);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.95rem;
+  padding: 10px 18px;
+  border-radius: 999px;
+  box-shadow: 0 6px 16px rgba(255, 112, 67, 0.35);
+}
+
+.enter-btn:hover {
+  filter: brightness(1.05);
+}

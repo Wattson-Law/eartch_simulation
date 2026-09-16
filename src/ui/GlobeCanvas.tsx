@@ -156,28 +156,42 @@ export function GlobeCanvas({ onEnterYellowstone }: Props) {
       canvas.style.cursor = hoverHotRef.current ? 'pointer' : 'default';
     };
     const onClick = (e: MouseEvent) => {
-      if (hitTest(e.clientX, e.clientY)) onEnterYellowstone();
+      const rect = canvas.getBoundingClientRect();
+      const w = rect.width;
+      const h = rect.height;
+      const cx = w / 2;
+      const cy = h / 2 - 10;
+      const r = Math.min(w, h) * 0.32;
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const dx = x - cx;
+      const dy = y - cy;
+      // 单击地球表面或热点均可进入
+      if (dx * dx + dy * dy <= r * r || hitTest(e.clientX, e.clientY)) {
+        onEnterYellowstone();
+      }
     };
-    // 也允许点击地球任意处进入（MVP 友好）
-    const onDblClick = () => onEnterYellowstone();
 
     canvas.addEventListener('mousemove', onMove);
     canvas.addEventListener('click', onClick);
-    canvas.addEventListener('dblclick', onDblClick);
 
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', resize);
       canvas.removeEventListener('mousemove', onMove);
       canvas.removeEventListener('click', onClick);
-      canvas.removeEventListener('dblclick', onDblClick);
     };
   }, [onEnterYellowstone]);
 
   return (
     <div className="globe-wrap">
       <canvas ref={canvasRef} className="globe-canvas" />
-      <p className="globe-hint">点击橙色热点（或双击地球）进入黄石生态区</p>
+      <div className="globe-actions">
+        <p className="globe-hint">点击地球或橙色热点进入黄石生态区</p>
+        <button type="button" className="enter-btn" onClick={onEnterYellowstone}>
+          进入黄石生态区
+        </button>
+      </div>
     </div>
   );
 }

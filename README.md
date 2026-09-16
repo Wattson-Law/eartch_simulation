@@ -7,7 +7,6 @@
 ## 如何运行
 
 ```bash
-cd app   # 或进入本仓库根目录（本 MVP 以 app/ 为项目根）
 npm install
 npm run dev
 ```
