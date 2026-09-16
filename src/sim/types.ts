@@ -1,7 +1,7 @@
 /** 季节 */
 export type Season = 'spring' | 'summer' | 'autumn' | 'winter';
 
-/** 事件来源：便于评审追因果 */
+/** 事件来源：便于评审追因果（内部字段，UI 可弱化展示） */
 export type EventSource = 'system' | 'user-command' | 'predation';
 
 /** 物种键 */
@@ -18,7 +18,8 @@ export type SimCommand =
   | { type: 'pause' }
   | { type: 'resume' }
   | { type: 'fast_forward'; ticks: number }
-  | { type: 'query'; about: 'most' | 'status' | 'why_rabbits' };
+  | { type: 'query'; about: 'most' | 'status' | 'why_rabbits' }
+  | { type: 'tourist_conflict' };
 
 /** 事件日志条目 */
 export interface LogEntry {
@@ -37,6 +38,25 @@ export interface HistoryPoint {
   rabbits: number;
   elk: number;
   wolves: number;
+}
+
+/** 叙事级联阶段（不改种群数字） */
+export type CascadeStageStatus = 'pending' | 'active' | 'done';
+
+export interface CascadeStage {
+  id: string;
+  title: string;
+  story: string;
+  status: CascadeStageStatus;
+  delayTicks: number;
+}
+
+export interface CausalCascade {
+  id: string;
+  title: string;
+  triggerLabel: string;
+  startedAtTick: number;
+  stages: CascadeStage[];
 }
 
 /** 核心生态状态 */
@@ -58,6 +78,8 @@ export interface EcosystemState {
   /** 最近一次捕食，用于触发动画 */
   lastPredation: { prey: 'rabbits' | 'elk'; amount: number } | null;
   nextLogId: number;
+  /** 叙事级联队列（不改种群数字） */
+  causalQueue: CausalCascade[];
 }
 
 export const SEASON_LABELS: Record<Season, string> = {

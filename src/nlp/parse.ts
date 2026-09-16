@@ -88,6 +88,17 @@ export function parseCommand(input: string): ParseResult {
     }
   }
 
+  // —— 情景注入芯片 / 叙事快捷指令 ——
+  if (/暴风雪|暴雪|提前.*冬|深冬|寒潮/.test(text)) {
+    return { ok: true, command: { type: 'force_season', season: 'winter' }, matched: '暴风雪提前' };
+  }
+  if (/雷击|野火|雷火/.test(text)) {
+    return { ok: true, command: { type: 'trigger_fire' }, matched: '雷击野火' };
+  }
+  if (/游客|投喂|人为干扰|投食冲突/.test(text)) {
+    return { ok: true, command: { type: 'tourist_conflict' }, matched: '游客投喂冲突' };
+  }
+
   // —— 暂停 / 继续 ——
   if (/暂停|停下|先停|pause/i.test(text)) {
     return { ok: true, command: { type: 'pause' }, matched: '暂停' };
@@ -185,6 +196,6 @@ export function parseCommand(input: string): ParseResult {
     ok: false,
     reason:
       REFUSAL_PREFIX +
-      '无法理解该指令。可试：「下雨」「发生火灾」「增加十只狼」「快进到冬天」「暂停」「继续」「现在谁最多」。离谱指令会被拒绝。',
+      '这条我没法按巡护规程执行。可试：「暴风雪提前」「雷击野火」「游客投喂冲突」「增加十只狼」「下雨」「现在谁最多」。离谱指令会被拒绝。',
   };
 }

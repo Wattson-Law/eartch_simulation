@@ -19,9 +19,14 @@ export function createInitialState(): EcosystemState {
     history: [],
     lastPredation: null,
     nextLogId: 1,
+    causalQueue: [],
   };
 
-  const withLog = pushLog(base, 'system', '黄石宏观生态模拟已启动。四季与食物链开始运转。');
+  const withLog = pushLog(
+    base,
+    'system',
+    '巡护站开台：拉马谷监测开始，四季与食物链进入记录。',
+  );
   const withHistory = appendHistory(withLog);
   return clampState(withHistory);
 }

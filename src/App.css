@@ -144,6 +144,8 @@
   background: #e3f2fd;
 }
 
+/* height owned by .eco-scene-wrap when present */
+
 .species-panel {
   background: #f9fbf7;
   border-radius: 12px;
@@ -536,4 +538,315 @@
 
 .enter-btn:hover {
   filter: brightness(1.05);
+}
+
+/* —— 场景包装 + 个体 tooltip —— */
+.eco-scene-wrap {
+  position: relative;
+  width: 100%;
+  height: 240px;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.eco-scene-wrap .eco-scene-canvas {
+  width: 100%;
+  height: 100%;
+  border-radius: 12px;
+  display: block;
+  background: #e3f2fd;
+  cursor: crosshair;
+}
+
+.eco-tooltip {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid #90caf9;
+  border-radius: 10px;
+  padding: 8px 10px;
+  min-width: 140px;
+  max-width: 200px;
+  box-shadow: 0 8px 20px rgba(33, 33, 33, 0.15);
+  pointer-events: none;
+  z-index: 4;
+}
+
+.eco-tooltip-title {
+  font-weight: 700;
+  font-size: 0.8rem;
+  color: #1b2b1f;
+  margin-bottom: 2px;
+}
+
+.eco-tooltip-line {
+  font-size: 0.72rem;
+  color: #546e7a;
+  line-height: 1.35;
+}
+
+/* —— 情景注入芯片 —— */
+.scenario-chips {
+  padding: 0 12px 8px;
+}
+
+.scenario-label {
+  font-size: 0.7rem;
+  color: #78909c;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+.scenario-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.scenario-chip {
+  border: none;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  color: #fff;
+  flex: 1 1 90px;
+  text-align: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.scenario-chip--winter {
+  background: linear-gradient(135deg, #42a5f5, #1565c0);
+}
+
+.scenario-chip--fire {
+  background: linear-gradient(135deg, #ff7043, #bf360c);
+}
+
+.scenario-chip--tourist {
+  background: linear-gradient(135deg, #a1887f, #6d4c41);
+}
+
+.scenario-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.cascade-open-btn {
+  margin-left: auto;
+  border: 1px solid #ffb74d;
+  background: #fff3e0;
+  color: #e65100;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cascade-open-btn:hover {
+  background: #ffe0b2;
+}
+
+/* —— 因果级联面板 —— */
+.cascade-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(20, 28, 36, 0.45);
+  display: grid;
+  place-items: center;
+  z-index: 8;
+  padding: 16px;
+}
+
+.cascade-card {
+  background: #fffef8;
+  border-radius: 16px;
+  border: 1px solid #ffe0b2;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.25);
+  max-width: 560px;
+  width: 100%;
+  max-height: min(80vh, 520px);
+  overflow: auto;
+  padding: 16px 18px 14px;
+}
+
+.cascade-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.cascade-header h3 {
+  margin: 2px 0 4px;
+  font-size: 1.05rem;
+}
+
+.cascade-kicker {
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  color: #ef6c00;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.cascade-trigger {
+  margin: 0;
+  font-size: 0.75rem;
+  color: #78909c;
+}
+
+.cascade-close {
+  border: none;
+  background: #eceff1;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 1.2rem;
+  cursor: pointer;
+  line-height: 1;
+  color: #455a64;
+}
+
+.cascade-flow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 14px;
+  padding: 10px;
+  background: #fff8e1;
+  border-radius: 12px;
+}
+
+.cascade-flow-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cascade-arrow {
+  color: #ff9800;
+  font-weight: 700;
+  padding: 0 2px;
+}
+
+.cascade-node {
+  background: #fff;
+  border: 1px solid #ffcc80;
+  border-radius: 10px;
+  padding: 6px 8px;
+  min-width: 88px;
+  text-align: center;
+}
+
+.cascade-node--pending {
+  opacity: 0.45;
+  border-style: dashed;
+}
+
+.cascade-node--active {
+  border-color: #ff9800;
+  box-shadow: 0 0 0 2px rgba(255, 152, 0, 0.25);
+}
+
+.cascade-node--done {
+  border-color: #66bb6a;
+  background: #f1f8e9;
+}
+
+.cascade-node-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.cascade-badge {
+  display: inline-block;
+  font-size: 0.62rem;
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-weight: 600;
+}
+
+.cascade-badge--pending {
+  background: #eceff1;
+  color: #78909c;
+}
+
+.cascade-badge--active {
+  background: #ffe0b2;
+  color: #e65100;
+}
+
+.cascade-badge--done {
+  background: #c8e6c9;
+  color: #2e7d32;
+}
+
+.cascade-stages {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cascade-stage {
+  border: 1px solid #eee;
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: #fafafa;
+}
+
+.cascade-stage--active {
+  border-color: #ffb74d;
+  background: #fff8e1;
+}
+
+.cascade-stage--done {
+  border-color: #a5d6a7;
+  background: #f9fbe7;
+}
+
+.cascade-stage--pending {
+  opacity: 0.55;
+}
+
+.cascade-stage-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 0.85rem;
+}
+
+.cascade-stage-idx {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #ff9800;
+  color: #fff;
+  font-size: 0.7rem;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+}
+
+.cascade-stage p {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #455a64;
+  line-height: 1.45;
+}
+
+.cascade-footnote {
+  margin: 12px 0 0;
+  font-size: 0.7rem;
+  color: #90a4ae;
+  line-height: 1.4;
 }

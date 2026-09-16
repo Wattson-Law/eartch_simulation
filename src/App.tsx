@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createInitialState } from './sim/state';
 import { tick } from './sim/tick';
 import { applyCommand } from './sim/commands';
+import { latestCascade } from './sim/cascade';
 import type { EcosystemState } from './sim/types';
 import { parseCommand } from './nlp/parse';
 import { GlobeCanvas } from './ui/GlobeCanvas';
@@ -9,6 +10,7 @@ import { EcoView } from './ui/EcoView';
 import { ChatPanel, initialChatMessages, type ChatMessage } from './ui/ChatPanel';
 import { PredationAnimation } from './ui/PredationAnimation';
 import { Disclaimer } from './ui/Disclaimer';
+import { CausalCascadePanel } from './ui/CausalCascadePanel';
 import './App.css';
 
 type View = 'globe' | 'eco';
@@ -19,11 +21,11 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>(() => initialChatMessages());
   const [predationAnim, setPredationAnim] = useState(false);
   const [preyKind, setPreyKind] = useState<'rabbits' | 'elk'>('rabbits');
+  const [cascadeOpen, setCascadeOpen] = useState(false);
   const stateRef = useRef(state);
   const msgIdRef = useRef(2);
   stateRef.current = state;
 
-  // 自动 tick
   useEffect(() => {
     const id = window.setInterval(() => {
       setState((prev) => {
@@ -64,21 +66,23 @@ export default function App() {
       setPreyKind(result.state.lastPredation.prey);
       setPredationAnim(true);
     }
-    // 若是「让狼捕食」类映射到快进，补充一句说明
     let reply = result.reply;
     if (parsed.matched === '触发捕食观察') {
       reply =
-        '已推进时间步以观察自然捕食（模拟器按食物链结算，AI 不直接改数量）。\n' + reply;
+        '我先把观察窗口往前拨两步，看看猎场上自然发生的捕食——我不会直接改数量。\n' + reply;
     }
     pushMessages(text, reply);
 
-    if (view === 'globe') {
-      // 有意义的环境/物种指令时自动进入生态区
+    if (result.openCascade) {
+      setCascadeOpen(true);
+      setView('eco');
+    } else if (view === 'globe') {
       setView('eco');
     }
   }, [pushMessages, view]);
 
   const enterYellowstone = useCallback(() => setView('eco'), []);
+  const cascade = latestCascade(state);
 
   return (
     <div className="app-shell">
@@ -98,12 +102,22 @@ export default function App() {
           {view === 'globe' ? (
             <GlobeCanvas onEnterYellowstone={enterYellowstone} />
           ) : (
-            <EcoView state={state} onBack={() => setView('globe')} />
+            <EcoView
+              state={state}
+              onBack={() => setView('globe')}
+              onOpenCascade={() => setCascadeOpen(true)}
+              hasCascade={cascade != null}
+            />
           )}
           <PredationAnimation
             active={predationAnim}
             preyLabel={preyKind}
             onDone={() => setPredationAnim(false)}
+          />
+          <CausalCascadePanel
+            cascade={cascade}
+            open={cascadeOpen}
+            onClose={() => setCascadeOpen(false)}
           />
         </section>
         <ChatPanel messages={messages} onSend={handleSend} />
@@ -111,7 +125,7 @@ export default function App() {
 
       <footer className="app-footer">
         <Disclaimer />
-        <span className="footer-note">AI 只解释；数值仅由确定性模拟器变更 · Day 1–2 MVP</span>
+        <span className="footer-note">巡护员只叙述；数值仅由确定性模拟器变更 · 沉浸 MVP</span>
       </footer>
     </div>
   );

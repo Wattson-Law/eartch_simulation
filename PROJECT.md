@@ -204,3 +204,15 @@ AI 只把自然语言转成合法的结构化事件，再由模拟器执行。�
 - 已推送到 GitHub main：https://github.com/Wattson-Law/eartch_simulation （commit feat Day1-2 MVP）
 - 待用户：本地 `npm install && npm run dev` 验证。
 
+## 十三、沉浸叙事升级（2026-09-16，本轮已落地）
+
+参考用户 mockup「Yellowstone Ecosystem · Lamar Valley Story」与五点改造，本轮落地：
+
+1. 因果链条：`src/sim/cascade.ts` + `CausalCascadePanel`，三段式图文（狼回归 → 植被/河岸 → 水狸与河流叙事；野火另有三段）。
+2. 个体悬停：动物有名字与状态 Tooltip。
+3. 生境分层 + 季节色调/飘雪（Canvas 2D）。
+4. 右侧人设改为「黄石巡护员」，野外考察简报语气。
+5. 情境芯片：暴风雪 / 野火 / 游客冲突（映射既有指令）。
+
+硬约束不变：数值只由确定性模拟器变更；对外仍标注科学玩具。
+

@@ -3,13 +3,15 @@ import { SEASON_LABELS, SPECIES_LABELS, SEASON_ORDER } from './types';
 import { clampState, BOUNDS } from './bounds';
 import { pushLog } from './state';
 import { tick, tickMany } from './tick';
+import { enqueueFireCascade, enqueueWolfCascade } from './cascade';
 
 export interface ApplyResult {
   state: EcosystemState;
-  /** 给聊天框的中文解释（只描述模拟器实际做了什么） */
+  /** 巡护员第一人称简报 */
   reply: string;
-  /** 是否触发捕食动画（由后续 tick 产生时也可） */
   triggerPredationAnim: boolean;
+  /** 是否应打开级联故事面板 */
+  openCascade?: boolean;
 }
 
 /**
@@ -24,10 +26,14 @@ export function applyCommand(state: EcosystemState, command: SimCommand): ApplyR
         ...state,
         rainfall: state.rainfall + boost,
       });
-      s = pushLog(s, 'user-command', `用户指令：降雨增强约 ${weeks} 周（降雨强度 +${boost.toFixed(2)}）。`);
+      s = pushLog(
+        s,
+        'user-command',
+        `气象简报：降雨增强约 ${weeks} 周量级，河谷湿度上升。`,
+      );
       return {
         state: s,
-        reply: `已执行：模拟器将降雨强度提高了 ${boost.toFixed(2)}（约 ${weeks} 周量级）。当前降雨 ${(s.rainfall).toFixed(2)}。植物生长会在后续 tick 受益。`,
+        reply: `收到。我在河谷雨量筒旁复核过——降雨强度抬升了约 ${boost.toFixed(2)}（约 ${weeks} 周量级），当前 ${(s.rainfall).toFixed(2)}。接下来几个时间步，草与灌丛会喝得更饱。`,
         triggerPredationAnim: false,
       };
     }
@@ -38,11 +44,15 @@ export function applyCommand(state: EcosystemState, command: SimCommand): ApplyR
         ...state,
         temperature: state.temperature + delta,
       });
-      const dir = delta >= 0 ? '升高' : '降低';
-      s = pushLog(s, 'user-command', `用户指令：温度${dir} ${Math.abs(delta)}°C。`);
+      const dir = delta >= 0 ? '回暖' : '变冷';
+      s = pushLog(
+        s,
+        'user-command',
+        `气象简报：气温${dir} ${Math.abs(delta)}°C，现 ${s.temperature}°C。`,
+      );
       return {
         state: s,
-        reply: `已执行：温度${dir} ${Math.abs(delta)}°C，当前 ${s.temperature}°C。这会影响后续植物生长与冬季压力。`,
+        reply: `气温确实在${dir}。我手套上的霜意${delta < 0 ? '更重了' : '松了些'}——当前 ${s.temperature}°C。这会牵动植物生长与冬季压力，我会继续盯着曲线。`,
         triggerPredationAnim: false,
       };
     }
@@ -51,7 +61,7 @@ export function applyCommand(state: EcosystemState, command: SimCommand): ApplyR
       if (state.fire) {
         return {
           state,
-          reply: '当前已有火灾在燃烧（剩余 ' + state.fireTicksLeft + ' 步）。未重复点火。',
+          reply: `火线还在烧（大约还剩 ${state.fireTicksLeft} 步）。我先不重复点火，专心盯着蔓延边界。`,
           triggerPredationAnim: false,
         };
       }
@@ -63,11 +73,17 @@ export function applyCommand(state: EcosystemState, command: SimCommand): ApplyR
         shrubs: state.shrubs * 0.88,
       };
       s = clampState(s);
-      s = pushLog(s, 'user-command', '用户指令：触发森林火灾。植被立即受损，火灾将持续数步。');
+      s = enqueueFireCascade(s, '雷击野火');
+      s = pushLog(
+        s,
+        'user-command',
+        '野外考察：雷击野火起势，植被当场受损，火情将持续数步。',
+      );
       return {
         state: s,
-        reply: `已执行：发生火灾。草降至约 ${Math.round(s.grass)}，灌木约 ${Math.round(s.shrubs)}；火灾标记将持续 ${s.fireTicksLeft} 个时间步。`,
+        reply: `烟柱先看见的。雷击点燃枯枝后，草大约落到 ${Math.round(s.grass)}、灌木 ${Math.round(s.shrubs)}；火标记还会挂 ${s.fireTicksLeft} 步。我已展开连锁影响简报——数字仍只随时间步走。`,
         triggerPredationAnim: false,
+        openCascade: true,
       };
     }
 
@@ -83,63 +99,91 @@ export function applyCommand(state: EcosystemState, command: SimCommand): ApplyR
       const target = command.season;
       const currentIdx = SEASON_ORDER.indexOf(state.season);
       const targetIdx = SEASON_ORDER.indexOf(target);
-      // 快进到目标季节起点：每季 8 tick
       let forward = (targetIdx - currentIdx + 4) % 4;
-      if (forward === 0) forward = 4; // 完整一圈到下一同名季，或至少推进到「下一段」
-      // 更直观：推进到该季节的第 0 步对齐
+      if (forward === 0) forward = 4;
       const ticksPerSeason = 8;
       const posInSeason = state.tick % ticksPerSeason;
       let steps = forward * ticksPerSeason - posInSeason;
       if (steps <= 0) steps = ticksPerSeason;
-      // 若目标就是当前季且刚进入，少推进
       if (target === state.season && posInSeason === 0) {
         return {
           state,
-          reply: `当前已经是${SEASON_LABELS[target]}。未推进时间。`,
+          reply: `站在瞭望台上看，现在已经是${SEASON_LABELS[target]}了，我没有再拨时钟。`,
           triggerPredationAnim: false,
         };
       }
 
       let s = tickMany({ ...state, paused: false }, steps);
-      // 若因对齐误差未落到目标季，再补推进直到进入目标季或达上限
       let guard = 0;
       while (s.season !== target && guard < ticksPerSeason * 4) {
         s = tick({ ...s, paused: false });
         guard += 1;
       }
-      s = pushLog(s, 'user-command', `用户指令：快进到${SEASON_LABELS[target]}（推进 ${steps + guard} 步）。`);
+      s = pushLog(
+        s,
+        'user-command',
+        `时间考察：快进至${SEASON_LABELS[target]}（推进 ${steps + guard} 步）。`,
+      );
       const prey = s.lastPredation;
       return {
         state: s,
-        reply: `已执行：时间推进 ${steps + guard} 步，当前季节为${SEASON_LABELS[s.season]}，温度 ${s.temperature}°C，降雨 ${s.rainfall.toFixed(2)}。`,
+        reply: `我把观察窗口推到了${SEASON_LABELS[s.season]}——一共走了 ${steps + guard} 步。此刻 ${s.temperature}°C，降雨 ${s.rainfall.toFixed(2)}。谷地的气味都不一样了。`,
         triggerPredationAnim: prey != null,
       };
     }
 
     case 'pause': {
       if (state.paused) {
-        return { state, reply: '模拟已处于暂停状态。', triggerPredationAnim: false };
+        return { state, reply: '观察已经暂停。你可以慢慢看河岸，或再下一条指令。', triggerPredationAnim: false };
       }
-      let s = pushLog({ ...state, paused: true }, 'user-command', '用户指令：暂停模拟。');
-      return { state: s, reply: '已暂停。时间步不再自动推进，你仍可下达环境/物种指令。', triggerPredationAnim: false };
+      let s = pushLog({ ...state, paused: true }, 'user-command', '巡护记录：暂停时间推进，便于细看现场。');
+      return {
+        state: s,
+        reply: '好，我按下暂停。时间步不再自动走，环境与物种指令仍可下达。',
+        triggerPredationAnim: false,
+      };
     }
 
     case 'resume': {
       if (!state.paused) {
-        return { state, reply: '模拟已在运行中。', triggerPredationAnim: false };
+        return { state, reply: '时钟本来就在走，我继续沿河巡线。', triggerPredationAnim: false };
       }
-      let s = pushLog({ ...state, paused: false }, 'user-command', '用户指令：继续模拟。');
-      return { state: s, reply: '已继续。时间步将恢复自动推进。', triggerPredationAnim: false };
+      let s = pushLog({ ...state, paused: false }, 'user-command', '巡护记录：恢复时间推进。');
+      return { state: s, reply: '继续。风又开始推着云走了。', triggerPredationAnim: false };
     }
 
     case 'fast_forward': {
       const n = Math.max(1, Math.min(48, command.ticks));
       let s = tickMany({ ...state, paused: false }, n);
-      s = pushLog(s, 'user-command', `用户指令：快进 ${n} 步。`);
+      s = pushLog(s, 'user-command', `时间考察：快进 ${n} 步，复核种群与天气。`);
       return {
         state: s,
-        reply: `已快进 ${n} 个时间步。当前第 ${s.tick} 步，${SEASON_LABELS[s.season]}，草 ${Math.round(s.grass)} / 兔 ${Math.round(s.rabbits)} / 狼 ${Math.round(s.wolves)}。`,
+        reply: `快进了 ${n} 步。此刻第 ${s.tick} 步，${SEASON_LABELS[s.season]}；草约 ${Math.round(s.grass)}、兔 ${Math.round(s.rabbits)}、狼 ${Math.round(s.wolves)}。都是现场仪表上的数。`,
         triggerPredationAnim: s.lastPredation != null,
+      };
+    }
+
+    case 'tourist_conflict': {
+      // 轻度状态：麋鹿略增（投喂吸引）+ 狼略减（惊扰）——仍走确定性数值路径
+      const elkBefore = state.elk;
+      const wolfBefore = state.wolves;
+      let s: EcosystemState = {
+        ...state,
+        elk: Math.min(BOUNDS.elk.max, state.elk + 8),
+        wolves: Math.max(BOUNDS.wolves.min, state.wolves - 2),
+      };
+      s = clampState(s);
+      const elkGain = Math.round(s.elk - elkBefore);
+      const wolfLoss = Math.round(wolfBefore - s.wolves);
+      s = pushLog(
+        s,
+        'user-command',
+        `人为干扰：游客投喂冲突——麋鹿被吸引（+${elkGain}），狼群短暂退避（-${wolfLoss}）。`,
+      );
+      return {
+        state: s,
+        reply: `啧，又有人在路边摊开零食。麋鹿凑近了约 ${elkGain} 头，狼群被喇叭声惊退约 ${wolfLoss} 只。我会记进人为干扰简报——请别学他们。`,
+        triggerPredationAnim: false,
       };
     }
 
@@ -149,7 +193,7 @@ export function applyCommand(state: EcosystemState, command: SimCommand): ApplyR
 
     default: {
       const _exhaustive: never = command;
-      return { state, reply: `未知命令：${JSON.stringify(_exhaustive)}`, triggerPredationAnim: false };
+      return { state, reply: `这条指令我还不认识：${JSON.stringify(_exhaustive)}`, triggerPredationAnim: false };
     }
   }
 }
@@ -172,20 +216,40 @@ function mutateSpecies(
     return {
       state,
       reply: mode === 'add'
-        ? `${label}已达上限 ${bound.max}，未能增加。`
-        : `${label}已为 ${Math.round(before)}，无法再减少。`,
+        ? `${label}已经顶到观察上限 ${bound.max}，我没法再往谷里添了。`
+        : `${label}现在大约 ${Math.round(before)}，再减就会穿底，我收手了。`,
       triggerPredationAnim: false,
     };
   }
 
   let s: EcosystemState = { ...state, [species]: after };
   s = clampState(s);
-  const verb = mode === 'add' ? '增加' : '减少';
-  s = pushLog(s, 'user-command', `用户指令：${verb} ${actual} ${unitOf(species)}${label}。`);
+  const verb = mode === 'add' ? '增补' : '下调';
+  const unit = unitOf(species);
+  s = pushLog(
+    s,
+    'user-command',
+    `物种简报：${verb} ${actual} ${unit}${label}，现场计数约 ${Math.round(s[species])}。`,
+  );
+
+  let openCascade = false;
+  if (mode === 'add' && species === 'wolves' && actual > 0) {
+    s = enqueueWolfCascade(s, `增补 ${actual} 只狼`);
+    openCascade = true;
+  }
+
+  const cascadeHint = openCascade
+    ? '\n连锁故事面板已打开：狼 → 啃食压力 → 河岸与水狸叙事。数字仍只随时间步与食物链走。'
+    : '';
+
   return {
     state: s,
-    reply: `已执行：${label}${verb} ${actual}，当前约 ${Math.round(s[species])}。后续 tick 会通过食物链传导影响。`,
+    reply:
+      mode === 'add'
+        ? `好——我刚在计数牌上写下：${label}增加 ${actual}${unit === '只' ? ' 只' : ' 单位'}，现在大约 ${Math.round(s[species])}。食物链会慢慢传下去。${cascadeHint}`
+        : `记下了：${label}减少 ${actual}，现约 ${Math.round(s[species])}。下游影响会在后续观察里显现。`,
     triggerPredationAnim: false,
+    openCascade,
   };
 }
 
@@ -207,7 +271,7 @@ function handleQuery(state: EcosystemState, about: 'most' | 'status' | 'why_rabb
     const [name, val] = entries[0];
     return {
       state,
-      reply: `当前数量最多的是「${name}」（约 ${Math.round(val)}）。完整排序：${entries.map(([n, v]) => `${n} ${Math.round(v)}`).join('、')}。以上数值均来自模拟器状态，非 AI 编造。`,
+      reply: `按仪表盘，眼下最多的是「${name}」（约 ${Math.round(val)}）。完整排序：${entries.map(([n, v]) => `${n} ${Math.round(v)}`).join('、')}。这些都是模拟器状态，不是我口头估的。`,
       triggerPredationAnim: false,
     };
   }
@@ -215,26 +279,24 @@ function handleQuery(state: EcosystemState, about: 'most' | 'status' | 'why_rabb
   if (about === 'why_rabbits') {
     const recent = state.log.filter((e) => e.message.includes('兔')).slice(-3);
     const tips = recent.length
-      ? recent.map((e) => `· [${e.source}] ${e.message}`).join('\n')
-      : '· 近期日志中暂无直接提到兔子的条目；可能是植物不足导致的缓慢下降，或狼群持续捕食。';
+      ? recent.map((e) => `· T${e.tick} ${e.message}`).join('\n')
+      : '· 近期简报很少直接点名兔子；可能是草量偏紧，或狼群持续施压。';
     return {
       state,
-      reply: `兔子当前约 ${Math.round(state.rabbits)}。可能原因（基于模拟器机制与日志）：\n${tips}\n草量 ${Math.round(state.grass)}，狼 ${Math.round(state.wolves)}。`,
+      reply: `兔子现在大约 ${Math.round(state.rabbits)}。我翻了最近的野外简报：\n${tips}\n对照：草 ${Math.round(state.grass)}，狼 ${Math.round(state.wolves)}。`,
       triggerPredationAnim: false,
     };
   }
 
-  // status
   return {
     state,
     reply: [
-      `第 ${state.tick} 步 · ${SEASON_LABELS[state.season]} · ${state.paused ? '已暂停' : '运行中'}`,
-      `温度 ${state.temperature}°C · 降雨 ${state.rainfall.toFixed(2)}${state.fire ? ` · 火灾中(剩${state.fireTicksLeft}步)` : ''}`,
+      `第 ${state.tick} 步 · ${SEASON_LABELS[state.season]} · ${state.paused ? '观察暂停' : '巡线中'}`,
+      `气温 ${state.temperature}°C · 降雨 ${state.rainfall.toFixed(2)}${state.fire ? ` · 火情(剩${state.fireTicksLeft}步)` : ''}`,
       `草 ${Math.round(state.grass)} · 灌木 ${Math.round(state.shrubs)} · 兔 ${Math.round(state.rabbits)} · 麋鹿 ${Math.round(state.elk)} · 狼 ${Math.round(state.wolves)}`,
     ].join('\n'),
     triggerPredationAnim: false,
   };
 }
 
-/** 导出供测试：单步 tick 再应用 */
 export { tick };

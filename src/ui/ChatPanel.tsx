@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { WELCOME_MESSAGE } from '../nlp';
+import { WELCOME_MESSAGE, RANGER_NAME, RANGER_SHORT } from '../nlp';
 
 export interface ChatMessage {
   id: number;
@@ -12,6 +12,14 @@ interface Props {
   onSend: (text: string) => void;
   disabled?: boolean;
 }
+
+const SCENARIO_CHIPS = [
+  { label: '暴风雪提前', text: '暴风雪提前', tone: 'winter' as const },
+  { label: '雷击野火', text: '雷击野火', tone: 'fire' as const },
+  { label: '游客投喂冲突', text: '游客投喂冲突', tone: 'tourist' as const },
+];
+
+const QUICK_CHIPS = ['增加十只狼', '下雨', '现在谁最多'];
 
 export function ChatPanel({ messages, onSend, disabled }: Props) {
   const [input, setInput] = useState('');
@@ -33,10 +41,12 @@ export function ChatPanel({ messages, onSend, disabled }: Props) {
   return (
     <aside className="chat-panel">
       <header className="chat-header">
-        <div className="chat-avatar">🌱</div>
+        <div className="chat-avatar" title={RANGER_NAME}>
+          🧭
+        </div>
         <div>
-          <div className="chat-title">生态系统管理员</div>
-          <div className="chat-sub">规则解析 · 解释模拟结果 · 不伪造数值</div>
+          <div className="chat-title">{RANGER_NAME}</div>
+          <div className="chat-sub">{RANGER_SHORT}电台 · 野外简报 · 不伪造数值</div>
         </div>
       </header>
       <div className="chat-messages" ref={listRef}>
@@ -52,7 +62,7 @@ export function ChatPanel({ messages, onSend, disabled }: Props) {
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="例如：下雨、增加十只狼、快进到冬天…"
+          placeholder="对巡护员说：暴风雪提前、增加十只狼…"
           disabled={disabled}
           aria-label="指令输入"
         />
@@ -60,8 +70,24 @@ export function ChatPanel({ messages, onSend, disabled }: Props) {
           发送
         </button>
       </form>
+      <div className="scenario-chips">
+        <div className="scenario-label">情景注入</div>
+        <div className="scenario-row">
+          {SCENARIO_CHIPS.map((s) => (
+            <button
+              key={s.label}
+              type="button"
+              className={`scenario-chip scenario-chip--${s.tone}`}
+              onClick={() => onSend(s.text)}
+              disabled={disabled}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="chat-suggestions">
-        {['下雨', '发生火灾', '增加十只狼', '快进到冬天', '暂停', '现在谁最多'].map((s) => (
+        {QUICK_CHIPS.map((s) => (
           <button key={s} type="button" className="chip" onClick={() => onSend(s)} disabled={disabled}>
             {s}
           </button>

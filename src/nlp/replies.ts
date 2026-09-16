@@ -1,9 +1,12 @@
 import type { EcosystemState } from '../sim/types';
 import { SEASON_LABELS } from '../sim/types';
 
-/** 系统欢迎语 */
+/** 巡护员欢迎语（第一人称野外简报语气） */
 export const WELCOME_MESSAGE =
-  '你好，我是生态系统管理员。我会把你的中文指令解析成结构化事件，交由确定性模拟器执行，然后只解释模拟器实际改变了什么——我不会私自改数字。\n试试：「下雨三周」「增加十只狼」「快进到冬天」「现在谁最多」。';
+  '你好，我是黄石巡护员 · Ranger Lin。我会把你的话记进巡护日志，再按谷里真实发生的天气、种群与猎场变化向你汇报——数字只来自现场仪表，我不会口头编造。\n试试：「暴风雪提前」「增加十只狼」「雷击野火」「现在谁最多」。';
+
+export const RANGER_NAME = '黄石巡护员 · Ranger Lin';
+export const RANGER_SHORT = '巡护员';
 
 export function formatStateBrief(state: EcosystemState): string {
   return `${SEASON_LABELS[state.season]} · T${state.tick} · 草${Math.round(state.grass)} 兔${Math.round(state.rabbits)} 狼${Math.round(state.wolves)}`;

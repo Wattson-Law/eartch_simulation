@@ -2,6 +2,7 @@ import type { EcosystemState, Season } from './types';
 import { SEASON_ORDER, SEASON_LABELS } from './types';
 import { clampState } from './bounds';
 import { appendHistory, pushLog } from './state';
+import { tickCascades } from './cascade';
 
 const TICKS_PER_SEASON = 8;
 
@@ -15,7 +16,7 @@ const SEASON_CLIMATE: Record<Season, { temp: number; rain: number }> = {
 
 /**
  * 纯确定性一步推进。
- * 顺序：季节/气候 → 火灾衰减 → 植物 → 草食 → 捕食 → 夹紧 → 历史 → 日志。
+ * 顺序：季节/气候 → 火灾衰减 → 植物 → 草食 → 捕食 → 夹紧 → 历史 → 日志 → 叙事级联。
  */
 export function tick(state: EcosystemState): EcosystemState {
   if (state.paused) return state;
@@ -33,7 +34,6 @@ export function tick(state: EcosystemState): EcosystemState {
   s = { ...s, season: nextSeason };
 
   const climate = SEASON_CLIMATE[nextSeason];
-  // 降雨向季节基准缓慢回归；温度同理（用户命令可临时拉偏）
   s = {
     ...s,
     rainfall: s.rainfall * 0.7 + climate.rain * 0.3,
@@ -41,7 +41,11 @@ export function tick(state: EcosystemState): EcosystemState {
   };
 
   if (seasonChanged) {
-    s = pushLog(s, 'system', `季节切换：进入${SEASON_LABELS[nextSeason]}。`);
+    s = pushLog(
+      s,
+      'system',
+      `季节更迭：拉马谷进入${SEASON_LABELS[nextSeason]}，气候基线随之偏移。`,
+    );
   }
 
   // —— 火灾 ——
@@ -57,7 +61,7 @@ export function tick(state: EcosystemState): EcosystemState {
       fire: fireTicksLeft > 0,
     };
     if (fireTicksLeft === 0) {
-      s = pushLog(s, 'system', '火灾已熄灭，植被开始缓慢恢复。');
+      s = pushLog(s, 'system', '野火观测：火线熄灭，焦土上植被开始缓慢返青。');
     }
   }
 
@@ -65,7 +69,6 @@ export function tick(state: EcosystemState): EcosystemState {
   const plantFactor = plantGrowthFactor(s);
   const grassGrowth = s.grass * 0.04 * plantFactor + 15 * plantFactor;
   const shrubGrowth = s.shrubs * 0.025 * plantFactor + 8 * plantFactor;
-  // 冬季植物几乎不长
   const winterMul = s.season === 'winter' ? 0.15 : 1;
   s = {
     ...s,
@@ -84,10 +87,8 @@ export function tick(state: EcosystemState): EcosystemState {
 
   const rabbitBirth = s.rabbits * 0.08 * Math.min(1.5, rabbitFood);
   const elkBirth = s.elk * 0.035 * Math.min(1.3, elkFood);
-  // 食物不足时自然死亡
   const rabbitStarve = s.rabbits * 0.04 * Math.max(0, 1 - rabbitFood);
   const elkStarve = s.elk * 0.03 * Math.max(0, 1 - elkFood);
-  // 冬季额外压力
   const winterStress = s.season === 'winter' ? 0.025 : 0;
 
   s = {
@@ -135,12 +136,11 @@ export function tick(state: EcosystemState): EcosystemState {
     s = pushLog(
       s,
       'predation',
-      `狼群捕猎：约 ${lastPredation.amount} 只${preyLabel}被捕食。`,
+      `河岸猎场：狼群捕得约 ${lastPredation.amount} 只${preyLabel}，草食动物明显警觉。`,
     );
   }
 
   s = clampState(s);
-  // 取整展示友好（内部仍可有小数，展示层再 round）
   s = {
     ...s,
     grass: Math.round(s.grass * 10) / 10,
@@ -153,13 +153,12 @@ export function tick(state: EcosystemState): EcosystemState {
   };
 
   s = appendHistory(s);
+  s = tickCascades(s);
   return s;
 }
 
 function plantGrowthFactor(s: EcosystemState): number {
-  // 降雨最佳约 0.5；过干过湿都减产
   const rainScore = 1 - Math.abs(s.rainfall - 0.5) * 1.2;
-  // 温度最佳约 15°C
   const tempScore = 1 - Math.abs(s.temperature - 15) / 40;
   const firePenalty = s.fire ? 0.35 : 1;
   return Math.max(0.05, rainScore * 0.6 + tempScore * 0.4) * firePenalty;
