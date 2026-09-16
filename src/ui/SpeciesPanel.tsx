@@ -1,6 +1,6 @@
 import type { EcosystemState } from '../sim/types';
 import { SEASON_LABELS } from '../sim/types';
-import { ANIMAL_SHEETS } from '../assetsPaths';
+import { ANIMAL_SHEETS, PLANT_THUMBS } from '../assetsPaths';
 
 interface Props {
   state: EcosystemState;
@@ -11,13 +11,25 @@ type Row = {
   value: number;
   color: string;
   emoji?: string;
+  /** Full plant PNG thumbnail (not a spritesheet) */
+  plantThumb?: string;
   sheet?: { src: string; frameW: number; frameH: number };
 };
 
 export function SpeciesPanel({ state }: Props) {
   const rows: Row[] = [
-    { emoji: '🌿', label: '草', value: Math.round(state.grass), color: '#66bb6a' },
-    { emoji: '🌳', label: '灌木', value: Math.round(state.shrubs), color: '#9ccc65' },
+    {
+      label: '草',
+      value: Math.round(state.grass),
+      color: '#66bb6a',
+      plantThumb: PLANT_THUMBS.grass,
+    },
+    {
+      label: '灌木',
+      value: Math.round(state.shrubs),
+      color: '#9ccc65',
+      plantThumb: PLANT_THUMBS.shrubs,
+    },
     {
       label: '兔子',
       value: Math.round(state.rabbits),
@@ -65,7 +77,15 @@ export function SpeciesPanel({ state }: Props) {
         {rows.map((r) => (
           <div key={r.label} className="species-card" style={{ borderColor: r.color }}>
             <div className="species-icon">
-              {r.sheet ? (
+              {r.plantThumb ? (
+                <img
+                  className="species-thumb species-thumb-plant"
+                  src={r.plantThumb}
+                  alt={r.label}
+                  width={36}
+                  height={28}
+                />
+              ) : r.sheet ? (
                 <span
                   className="species-thumb"
                   style={{

@@ -62,3 +62,103 @@ export function drawSheetFrame(
   }
   ctx.restore();
 }
+
+/** Kenney foliage — curated sprites under public/assets/plants/ */
+const GRASS_FILES = [
+  'sprite_0001.png',
+  'sprite_0002.png',
+  'sprite_0003.png',
+  'sprite_0004.png',
+  'sprite_0005.png',
+  'sprite_0006.png',
+  'sprite_0007.png',
+  'sprite_0008.png',
+  'sprite_0024.png',
+  'sprite_0026.png',
+  'foliagePack_leaves_001.png',
+  'foliagePack_leaves_005.png',
+  'foliagePack_leaves_009.png',
+  'foliagePack_leaves_013.png',
+] as const;
+
+const SHRUB_FILES = [
+  'sprite_0009.png',
+  'sprite_0010.png',
+  'sprite_0011.png',
+  'sprite_0012.png',
+  'sprite_0013.png',
+  'sprite_0014.png',
+  'sprite_0015.png',
+  'sprite_0016.png',
+  'sprite_0017.png',
+  'sprite_0018.png',
+  'foliagePack_013.png',
+  'foliagePack_014.png',
+  'foliagePack_015.png',
+  'foliagePack_016.png',
+] as const;
+
+const TREE_FILES = [
+  'foliagePack_004.png',
+  'foliagePack_005.png',
+  'foliagePack_006.png',
+  'foliagePack_007.png',
+  'foliagePack_008.png',
+  'foliagePack_009.png',
+  'foliagePack_010.png',
+  'foliagePack_011.png',
+  'foliagePack_012.png',
+  'foliagePack_027.png',
+  'foliagePack_028.png',
+  'foliagePack_029.png',
+  'foliagePack_030.png',
+  'foliagePack_040.png',
+  'foliagePack_041.png',
+  'foliagePack_042.png',
+] as const;
+
+export function plantGrassUrl(file: string): string {
+  return assetUrl(`assets/plants/grass/${file}`);
+}
+
+export function plantShrubUrl(file: string): string {
+  return assetUrl(`assets/plants/shrubs/${file}`);
+}
+
+export function plantTreeUrl(file: string): string {
+  return assetUrl(`assets/plants/trees/${file}`);
+}
+
+export const PLANT_GRASS_URLS = GRASS_FILES.map(plantGrassUrl);
+export const PLANT_SHRUB_URLS = SHRUB_FILES.map(plantShrubUrl);
+export const PLANT_TREE_URLS = TREE_FILES.map(plantTreeUrl);
+
+/** Species panel thumbnails */
+export const PLANT_THUMBS = {
+  grass: plantGrassUrl('sprite_0003.png'),
+  shrubs: plantShrubUrl('sprite_0011.png'),
+} as const;
+
+export async function loadPlantImages(): Promise<{
+  grass: HTMLImageElement[];
+  shrubs: HTMLImageElement[];
+  trees: HTMLImageElement[];
+}> {
+  const loadAll = (urls: string[]) =>
+    Promise.all(
+      urls.map(async (src) => {
+        try {
+          return await loadImage(src);
+        } catch {
+          return null;
+        }
+      }),
+    ).then((arr) => arr.filter((img): img is HTMLImageElement => img != null));
+
+  const [grass, shrubs, trees] = await Promise.all([
+    loadAll(PLANT_GRASS_URLS),
+    loadAll(PLANT_SHRUB_URLS),
+    loadAll(PLANT_TREE_URLS),
+  ]);
+  return { grass, shrubs, trees };
+}

@@ -55,7 +55,7 @@ npm run preview
 2. **规则中文指令协议**：`src/nlp/parse.ts` 关键词/模板 → 结构化事件 + 统一拒绝话术。
 3. **可复现事件日志**：每条记录来源字段，UI 与聊天解释均基于日志/状态。
 4. **关键动画 stub**：狼捕兔 CSS/Canvas 示意，由捕食日志触发，不改数值。
-5. **扁平插画视觉**：地球 + 黄石场景自绘，并接入 CC0 卡通精灵（Kenney / Pixel Earth / ScratchIO）。
+5. **扁平插画视觉**：地球 + 黄石场景自绘，并接入 CC0 卡通精灵（Kenney / Pixel Earth / ScratchIO）；植物层为 Kenney foliage（见 CREDITS）。
 6. **素材致谢**：第三方 CC0 资源清单见 `public/assets/CREDITS.md`。
 
 ## 目录结构
@@ -74,5 +74,5 @@ src/
 
 ## 致谢
 
-美术素材均为 CC0，详见 [`public/assets/CREDITS.md`](public/assets/CREDITS.md)（Kenney Planets、Pixel Earth Animation、ScratchIO Animated Wild Animals）。
+美术素材均为 CC0，详见 [`public/assets/CREDITS.md`](public/assets/CREDITS.md)（Kenney Planets、Pixel Earth Animation、ScratchIO Animated Wild Animals、Kenney Foliage Pack / Foliage Sprites）。
 

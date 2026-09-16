@@ -209,6 +209,11 @@
   max-height: 28px;
 }
 
+.species-thumb-plant {
+  object-fit: contain;
+  image-rendering: auto;
+}
+
 .species-label {
   font-size: 0.75rem;
   color: #607d8b;

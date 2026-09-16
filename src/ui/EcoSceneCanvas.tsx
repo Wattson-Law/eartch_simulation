@@ -4,6 +4,7 @@ import {
   ANIMAL_SHEETS,
   drawSheetFrame,
   loadImage,
+  loadPlantImages,
   type SheetMeta,
 } from '../assetsPaths';
 
@@ -23,10 +24,34 @@ interface Critter {
 }
 
 const MAX = { rabbit: 12, deer: 8, wolf: 6 } as const;
+/** Visual caps — density maps from grass/shrubs counts only (no sim change). */
+const PLANT_CAP = { trees: 10, shrubs: 14, grass: 20 } as const;
 
 function seeded(i: number, salt: number) {
   const t = Math.sin(i * 12.9898 + salt * 78.233) * 43758.5453;
   return t - Math.floor(t);
+}
+
+function drawSprite(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  x: number,
+  y: number,
+  drawH: number,
+  flipX = false,
+) {
+  const aspect = img.naturalWidth / Math.max(1, img.naturalHeight);
+  const dw = drawH * aspect;
+  const dh = drawH;
+  ctx.save();
+  if (flipX) {
+    ctx.translate(x + dw / 2, y);
+    ctx.scale(-1, 1);
+    ctx.drawImage(img, -dw / 2, -dh, dw, dh);
+  } else {
+    ctx.drawImage(img, x - dw / 2, y - dh, dw, dh);
+  }
+  ctx.restore();
 }
 
 /** 扁平插画风黄石场景（Canvas 2D + CC0 精灵） */
@@ -47,6 +72,12 @@ export function EcoSceneCanvas({ state }: Props) {
     const t0 = performance.now();
 
     const sheets: Partial<Record<keyof typeof ANIMAL_SHEETS, HTMLImageElement>> = {};
+    const plants = {
+      grass: [] as HTMLImageElement[],
+      shrubs: [] as HTMLImageElement[],
+      trees: [] as HTMLImageElement[],
+    };
+
     void (async () => {
       const entries = Object.entries(ANIMAL_SHEETS) as [
         keyof typeof ANIMAL_SHEETS,
@@ -61,6 +92,14 @@ export function EcoSceneCanvas({ state }: Props) {
           }
         }),
       );
+      try {
+        const loaded = await loadPlantImages();
+        plants.grass = loaded.grass;
+        plants.shrubs = loaded.shrubs;
+        plants.trees = loaded.trees;
+      } catch {
+        /* keep blob fallback */
+      }
     })();
 
     const crittersRef = { list: [] as Critter[] };
@@ -118,6 +157,25 @@ export function EcoSceneCanvas({ state }: Props) {
       ctx.fillRect(x - 1.5, y + size * 0.2, 3, size * 0.45);
     };
 
+    /** Map biomass → sprite counts. Fire temporarily thins foliage for feedback. */
+    const plantCounts = (s: EcosystemState) => {
+      // shrubs 0–5000 → trees up to 10; grass mix adds a little canopy richness
+      let treeN = Math.min(
+        PLANT_CAP.trees,
+        Math.max(0, Math.ceil(s.shrubs / 450) + Math.ceil(s.grass / 4000)),
+      );
+      // shrubs 0–5000 → mid bushes up to 14
+      let shrubN = Math.min(PLANT_CAP.shrubs, Math.max(0, Math.ceil(s.shrubs / 360)));
+      // grass 0–10000 → ground cover up to 20 (denser carpet when high)
+      let grassN = Math.min(PLANT_CAP.grass, Math.max(0, Math.ceil(s.grass / 500)));
+      if (s.fire) {
+        treeN = Math.max(0, Math.floor(treeN * 0.55));
+        shrubN = Math.max(0, Math.floor(shrubN * 0.5));
+        grassN = Math.max(0, Math.floor(grassN * 0.45));
+      }
+      return { treeN, shrubN, grassN };
+    };
+
     const paint = (now: number) => {
       if (cancelled) return;
       const s = stateRef.current;
@@ -159,6 +217,13 @@ export function EcoSceneCanvas({ state }: Props) {
       ctx.fillStyle = s.fire ? '#8d6e63' : s.season === 'winter' ? '#cfd8dc' : '#aed581';
       ctx.fillRect(0, h * 0.55, w, h * 0.45);
 
+      // Soft grass carpet tint when biomass is high (visual only)
+      if (!s.fire && s.grass > 2500) {
+        const carpet = Math.min(0.28, (s.grass - 2500) / 10000);
+        ctx.fillStyle = `rgba(102, 187, 106, ${carpet})`;
+        ctx.fillRect(0, h * 0.58, w, h * 0.42);
+      }
+
       ctx.fillStyle = '#4fc3f7';
       ctx.beginPath();
       ctx.moveTo(w * 0.55, h * 0.55);
@@ -167,19 +232,61 @@ export function EcoSceneCanvas({ state }: Props) {
       ctx.quadraticCurveTo(w * 0.58, h * 0.7, w * 0.65, h * 0.55);
       ctx.fill();
 
-      const shrubN = Math.min(10, Math.ceil(s.shrubs / 400));
-      const grassN = Math.min(14, Math.ceil(s.grass / 500));
-      for (let i = 0; i < grassN; i++) {
-        const gx = 16 + seeded(i, 31) * (w - 32);
-        const gy = h * 0.58 + seeded(i, 32) * h * 0.08;
-        ctx.fillStyle = s.season === 'winter' ? '#b0bec5' : '#7cb342';
-        ctx.fillRect(gx, gy, 2, 8 + seeded(i, 33) * 6);
+      const { treeN, shrubN, grassN } = plantCounts(s);
+      const hasTrees = plants.trees.length > 0;
+      const hasShrubs = plants.shrubs.length > 0;
+      const hasGrass = plants.grass.length > 0;
+
+      ctx.save();
+      if (s.fire) {
+        ctx.filter = 'brightness(0.55) sepia(0.55) saturate(1.2)';
+      } else if (s.season === 'winter') {
+        ctx.filter = 'brightness(1.05) saturate(0.55)';
+      } else if (s.season === 'autumn') {
+        ctx.filter = 'sepia(0.25) hue-rotate(-15deg) saturate(1.1)';
       }
+
+      // Background: trees / tall plants (shrubs-driven)
+      for (let i = 0; i < treeN; i++) {
+        const tx = 24 + seeded(i, 41) * (w - 48);
+        const ty = h * 0.52 + seeded(i, 42) * h * 0.08;
+        const size = 48 + seeded(i, 43) * 36;
+        if (hasTrees) {
+          const img = plants.trees[i % plants.trees.length]!;
+          drawSprite(ctx, img, tx, ty, size, seeded(i, 44) > 0.5);
+        } else {
+          drawPlantBlob(tx, ty - size * 0.3, size * 0.35, s.fire ? '#a1887f' : '#43a047');
+        }
+      }
+
+      // Mid: shrubs
       for (let i = 0; i < shrubN; i++) {
-        const sx = 30 + i * ((w - 60) / Math.max(shrubN, 1));
-        const sy = h * 0.58 + (i % 3) * 10;
-        drawPlantBlob(sx, sy, 14 + (i % 3) * 3, s.fire ? '#a1887f' : '#66bb6a');
+        const sx = 20 + seeded(i, 51) * (w - 40);
+        const sy = h * 0.58 + seeded(i, 52) * h * 0.12;
+        const size = 28 + seeded(i, 53) * 22;
+        if (hasShrubs) {
+          const img = plants.shrubs[i % plants.shrubs.length]!;
+          drawSprite(ctx, img, sx, sy, size, seeded(i, 54) > 0.5);
+        } else {
+          drawPlantBlob(sx, sy - 8, 14 + (i % 3) * 3, s.fire ? '#a1887f' : '#66bb6a');
+        }
       }
+
+      // Foreground: grass / leaf tufts
+      for (let i = 0; i < grassN; i++) {
+        const gx = 12 + seeded(i, 61) * (w - 24);
+        const gy = h * 0.7 + seeded(i, 62) * h * 0.22;
+        const size = 16 + seeded(i, 63) * 18;
+        if (hasGrass) {
+          const img = plants.grass[i % plants.grass.length]!;
+          drawSprite(ctx, img, gx, gy, size, seeded(i, 64) > 0.5);
+        } else {
+          ctx.fillStyle = s.season === 'winter' ? '#b0bec5' : '#7cb342';
+          ctx.fillRect(gx, gy - 10, 2, 8 + seeded(i, 33) * 6);
+        }
+      }
+
+      ctx.restore();
 
       // 同步数量（tick 变化时重建位置）
       const wantR = Math.min(MAX.rabbit, Math.max(0, Math.ceil(s.rabbits / 50)));
@@ -194,6 +301,7 @@ export function EcoSceneCanvas({ state }: Props) {
 
       const elapsed = (now - t0) / 1000;
 
+      // Animals drawn last so they stay in front of plants
       for (const c of crittersRef.list) {
         const bob = Math.sin(elapsed * c.speed * 4 + c.phase) * 1.5;
         const wander = Math.sin(elapsed * c.speed + c.phase) * 12;
@@ -202,7 +310,13 @@ export function EcoSceneCanvas({ state }: Props) {
         const frameT = elapsed * (c.kind === 'rabbit' ? 8 : 6) + c.phase;
 
         if (c.kind === 'rabbit') {
-          const key = sheets.rabbitHop ? 'rabbitHop' : sheets.rabbitIdle ? 'rabbitIdle' : sheets.rabbitRun ? 'rabbitRun' : null;
+          const key = sheets.rabbitHop
+            ? 'rabbitHop'
+            : sheets.rabbitIdle
+              ? 'rabbitIdle'
+              : sheets.rabbitRun
+                ? 'rabbitRun'
+                : null;
           if (key) {
             drawSheetFrame(ctx, sheets[key]!, ANIMAL_SHEETS[key], Math.floor(frameT), x, y, 1.35, c.flip);
           } else {
@@ -210,7 +324,13 @@ export function EcoSceneCanvas({ state }: Props) {
             ctx.fillText('🐇', x, y + 16);
           }
         } else if (c.kind === 'deer') {
-          const key = sheets.deerWalk ? 'deerWalk' : sheets.deerIdle ? 'deerIdle' : sheets.deerRun ? 'deerRun' : null;
+          const key = sheets.deerWalk
+            ? 'deerWalk'
+            : sheets.deerIdle
+              ? 'deerIdle'
+              : sheets.deerRun
+                ? 'deerRun'
+                : null;
           if (key) {
             drawSheetFrame(ctx, sheets[key]!, ANIMAL_SHEETS[key], Math.floor(frameT), x, y, 0.95, c.flip);
           } else {
