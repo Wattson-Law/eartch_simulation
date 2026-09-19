@@ -243,7 +243,8 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
     const sceneImages: Partial<Record<SceneLayerKey, { img: HTMLImageElement; src: string }>> = {};
     const generatedProps: { id: string; meta: ScenePropMeta; img: HTMLImageElement }[] = [];
     let manifest: EcosystemManifest | null = null;
-    let waterMask: HTMLImageElement | null = null;
+    let waterMask: HTMLCanvasElement | null = null;
+    let waterSource = 'procedural';
     let fishRoutes: readonly FishRoute[] = FALLBACK_FISH_ROUTES;
     const rippleCanvas = document.createElement('canvas');
     const rippleCtx = rippleCanvas.getContext('2d');
@@ -253,6 +254,33 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
       grass: [] as HTMLImageElement[],
       shrubs: [] as HTMLImageElement[],
       trees: [] as HTMLImageElement[],
+    };
+
+    const installWaterMask = (source: HTMLImageElement, inferWater = false) => {
+      const maskCanvas = document.createElement('canvas');
+      maskCanvas.width = source.naturalWidth;
+      maskCanvas.height = source.naturalHeight;
+      const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
+      if (!maskCtx) return;
+      maskCtx.drawImage(source, 0, 0);
+      const pixels = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
+      const { data } = pixels;
+      if (inferWater) {
+        // The river layer also includes its sandy bank. Select blue-green water
+        // from its opaque pixels if the separate mask cannot be downloaded.
+        for (let i = 0; i < data.length; i += 4) {
+          const water = data[i + 3]! > 230 && data[i + 1]! > data[i]! * 1.04 && data[i + 2]! > data[i]! * 1.07;
+          data[i + 3] = water ? 255 : 0;
+        }
+        maskCtx.putImageData(pixels, 0, 0);
+      }
+      fishRoutes = fitFishRoutes((x, y) => {
+        if (x < 0 || x >= 1 || y < 0 || y >= 1) return false;
+        const pixel = Math.floor(y * maskCanvas.height) * maskCanvas.width + Math.floor(x * maskCanvas.width);
+        return data[pixel * 4 + 3]! > 230;
+      });
+      waterMask = maskCanvas;
+      waterSource = inferWater ? 'inferred' : 'generated';
     };
 
     void (async () => {
@@ -286,24 +314,12 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
             }
           }),
         );
-        if (manifest.scene.waterMask) {
+        if (sceneImages.river) {
           try {
-            waterMask = await loadImage(manifest.scene.waterMask);
-            const maskCanvas = document.createElement('canvas');
-            maskCanvas.width = waterMask.naturalWidth;
-            maskCanvas.height = waterMask.naturalHeight;
-            const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
-            if (maskCtx) {
-              maskCtx.drawImage(waterMask, 0, 0);
-              const { data } = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
-              fishRoutes = fitFishRoutes((x, y) => {
-                if (x < 0 || x >= 1 || y < 0 || y >= 1) return false;
-                const pixel = Math.floor(y * maskCanvas.height) * maskCanvas.width + Math.floor(x * maskCanvas.width);
-                return data[pixel * 4 + 3]! > 230;
-              });
-            }
+            if (!manifest.scene.waterMask) throw new Error('No water mask');
+            installWaterMask(await loadImage(manifest.scene.waterMask));
           } catch {
-            waterMask = null;
+            installWaterMask(sceneImages.river.img, true);
           }
         }
       }
@@ -550,7 +566,7 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
       ctx.lineTo(w * 0.72, h);
       ctx.quadraticCurveTo(w * 0.72, h * 0.9, w * 0.64, h * 0.78);
       ctx.clip();
-      if (!sceneImages.river) drawSceneFish(ctx, w, h, elapsed, FALLBACK_FISH_ROUTES);
+      drawSceneFish(ctx, w, h, elapsed, FALLBACK_FISH_ROUTES);
       ctx.strokeStyle = 'rgba(255,255,255,0.42)';
       ctx.lineWidth = 1.5;
       for (let i = 0; i < 9; i++) {
@@ -900,10 +916,10 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
           canvas.dataset.wildlife = JSON.stringify({
             time: wildlife.time,
             observation: wildlife.observation,
-            scene: { sun: true, clouds: CLOUDS.length, fish: fishRoutes.length },
+            scene: { sun: true, clouds: CLOUDS.length, fish: (waterMask ? fishRoutes : FALLBACK_FISH_ROUTES).length, waterSource },
             environment: {
               clouds: CLOUDS.map((_, index) => cloudPosition(index, elapsed)),
-              fish: (waterMask ? fishRoutes : sceneImages.river ? [] : FALLBACK_FISH_ROUTES).map((route) => ({ ...fishPosition(route, elapsed), size: route.size })),
+              fish: (waterMask ? fishRoutes : FALLBACK_FISH_ROUTES).map((route) => ({ ...fishPosition(route, elapsed), size: route.size })),
               time: elapsed,
             },
             poses: [...visualPoses.entries()].map(([id, pose]) => ({ id, action: pose.action, blend: pose.blend, frame: pose.frame })),

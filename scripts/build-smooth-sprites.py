@@ -119,18 +119,11 @@ def flow_input(frame: np.ndarray) -> np.ndarray:
 
 
 def dense_flow(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    return cv2.calcOpticalFlowFarneback(
-        flow_input(a),
-        flow_input(b),
-        None,
-        pyr_scale=0.5,
-        levels=5,
-        winsize=29,
-        iterations=5,
-        poly_n=7,
-        poly_sigma=1.5,
-        flags=cv2.OPTFLOW_FARNEBACK_GAUSSIAN,
-    )
+    dis = cv2.DISOpticalFlow_create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
+    dis.setUseSpatialPropagation(True)
+    dis.setVariationalRefinementIterations(8)
+    dis.setFinestScale(1)
+    return dis.calc(flow_input(a), flow_input(b), None)
 
 
 def remap_float(image: np.ndarray, flow: np.ndarray, scale: float) -> np.ndarray:
@@ -144,6 +137,31 @@ def remap_float(image: np.ndarray, flow: np.ndarray, scale: float) -> np.ndarray
             map_x,
             map_y,
             interpolation=cv2.INTER_CUBIC,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=0,
+        )
+        for channel in range(image.shape[2])
+    ]
+    return np.stack(channels, axis=-1)
+
+
+def alpha_centroid(frame: np.ndarray) -> tuple[float, float]:
+    alpha = frame[..., 3].astype(np.float32)
+    total = float(alpha.sum())
+    if total <= 1e-4:
+        return FRAME_W / 2, FRAME_H / 2
+    y, x = np.indices(alpha.shape, dtype=np.float32)
+    return float((x * alpha).sum() / total), float((y * alpha).sum() / total)
+
+
+def translate_float(image: np.ndarray, dx: float, dy: float) -> np.ndarray:
+    matrix = np.array([[1.0, 0.0, dx], [0.0, 1.0, dy]], dtype=np.float32)
+    channels = [
+        cv2.warpAffine(
+            image[..., channel],
+            matrix,
+            (image.shape[1], image.shape[0]),
+            flags=cv2.INTER_CUBIC,
             borderMode=cv2.BORDER_CONSTANT,
             borderValue=0,
         )
@@ -179,41 +197,23 @@ def interpolate_pair(a: np.ndarray, b: np.ndarray, t: float) -> np.ndarray:
     warped_a = remap_float(a_pm, flow_ab, t)
     warped_b = remap_float(b_pm, flow_ba, 1.0 - t)
 
-    blend = t * t * (3.0 - 2.0 * t)
-    mixed = warped_a * (1.0 - blend) + warped_b * blend
+    ax, ay = alpha_centroid(a)
+    bx, by = alpha_centroid(b)
+    dx = bx - ax
+    dy = by - ay
 
-    # Use signed-distance silhouette interpolation to keep one clean animal
-    # outline. This lets the middle frame actually move toward the next pose
-    # without reintroducing faint duplicate legs from disjoint alpha regions.
-    silhouette = morphed_silhouette(a, b, t)
-    stronger = np.where(warped_a[..., 3:4] >= warped_b[..., 3:4], warped_a, warped_b)
-    has_mixed_color = mixed[..., 3:4] > 0.02
-    mixed = np.where(has_mixed_color, mixed, stronger)
-    mixed[..., 3:4] = np.minimum(mixed[..., 3:4], silhouette)
-    mixed[..., :3] = np.minimum(mixed[..., :3], mixed[..., 3:4])
+    # Keep a single source silhouette per in-between frame. The first two
+    # generated poses push the earlier keyframe forward; the last generated
+    # pose pulls the next keyframe backward. This avoids double-body dissolves.
+    if t < 0.7:
+        mixed = translate_float(warped_a, dx * t * 0.55, dy * t * 0.55)
+    else:
+        mixed = translate_float(warped_b, -dx * (1.0 - t) * 0.35, -dy * (1.0 - t) * 0.35)
 
     result = unpremultiply(mixed)
 
-    # Remove sub-pixel haze and thin optical-flow tails in generated frames.
-    # Original key poses are inserted directly and do not pass through this.
-    alpha = result[..., 3]
-    strong = (alpha > 76).astype(np.uint8)
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    cleaned = cv2.morphologyEx(strong, cv2.MORPH_CLOSE, kernel, iterations=1)
-    cleaned = cv2.dilate(cleaned, kernel, iterations=1)
-    components, labels, stats, _ = cv2.connectedComponentsWithStats(cleaned, connectivity=8)
-    keep = np.zeros_like(cleaned, dtype=bool)
-    if components > 1:
-        areas = stats[1:, cv2.CC_STAT_AREA]
-        largest = int(areas.max())
-        for label in range(1, components):
-            area = int(stats[label, cv2.CC_STAT_AREA])
-            if area >= max(18, largest * 0.004):
-                keep |= labels == label
-    feather = cv2.GaussianBlur(keep.astype(np.float32), (0, 0), 0.85)
-    result[..., :3] = (result[..., :3].astype(np.float32) * feather[..., None]).astype(np.uint8)
-    result[..., 3] = (result[..., 3].astype(np.float32) * feather).astype(np.uint8)
-    result[result[..., 3] < 24] = 0
+    # Remove sub-pixel color haze in fully transparent regions.
+    result[result[..., 3] < 3] = 0
     return result
 
 
@@ -226,7 +226,8 @@ def build_frames(keyframes: list[np.ndarray]) -> list[np.ndarray]:
             if step == 0:
                 out.append(frame.copy())
             else:
-                out.append(interpolate_pair(frame, next_frame, step / STEPS_PER_KEY))
+                warped_time = (0.32, 0.62, 0.84)[step - 1]
+                out.append(interpolate_pair(frame, next_frame, warped_time))
     return out
 
 
