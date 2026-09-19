@@ -197,9 +197,10 @@ def interpolate_pair(a: np.ndarray, b: np.ndarray, t: float) -> np.ndarray:
     # Remove sub-pixel haze and thin optical-flow tails in generated frames.
     # Original key poses are inserted directly and do not pass through this.
     alpha = result[..., 3]
-    strong = (alpha > 34).astype(np.uint8)
+    strong = (alpha > 76).astype(np.uint8)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     cleaned = cv2.morphologyEx(strong, cv2.MORPH_CLOSE, kernel, iterations=1)
+    cleaned = cv2.dilate(cleaned, kernel, iterations=1)
     components, labels, stats, _ = cv2.connectedComponentsWithStats(cleaned, connectivity=8)
     keep = np.zeros_like(cleaned, dtype=bool)
     if components > 1:
@@ -209,8 +210,10 @@ def interpolate_pair(a: np.ndarray, b: np.ndarray, t: float) -> np.ndarray:
             area = int(stats[label, cv2.CC_STAT_AREA])
             if area >= max(18, largest * 0.004):
                 keep |= labels == label
-    result[~keep] = 0
-    result[..., 3] = np.where(keep, np.clip(result[..., 3], 0, 255), 0).astype(np.uint8)
+    feather = cv2.GaussianBlur(keep.astype(np.float32), (0, 0), 0.85)
+    result[..., :3] = (result[..., :3].astype(np.float32) * feather[..., None]).astype(np.uint8)
+    result[..., 3] = (result[..., 3].astype(np.float32) * feather).astype(np.uint8)
+    result[result[..., 3] < 24] = 0
     return result
 
 

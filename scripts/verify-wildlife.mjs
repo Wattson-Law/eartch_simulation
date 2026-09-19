@@ -80,6 +80,52 @@ function pointCoverDepth(x, y) {
   return depth;
 }
 
+function sampleWalkablePositions() {
+  const samples = [
+    { x: 0.68, y: 0.64 },
+    { x: 0.84, y: 0.73 },
+    { x: 0.88, y: 0.76 },
+  ];
+  for (let y = 0.64; y <= 0.84 + 1e-9; y += 0.04) {
+    for (let x = 0.16; x <= 0.9 + 1e-9; x += 0.08) {
+      if (isWalkable(x, y)) samples.push({ x: Number(x.toFixed(3)), y: Number(y.toFixed(3)) });
+      if (samples.length >= 41) return samples;
+    }
+  }
+  return samples;
+}
+
+function forceRecoverCaught(kind, position) {
+  const s = state({ rabbits: kind === 'rabbit' ? 220 : 0, elk: kind === 'deer' ? 140 : 0, wolves: 20 });
+  const world = createWildlifeWorld(s);
+  const prey = world.agents.find((a) => a.kind === kind);
+  const predator = world.agents.find((a) => a.kind === 'wolf');
+  assert(prey && predator, `forced ${kind} recovery has predator and prey`);
+  prey.x = position.x;
+  prey.y = position.y;
+  prey.vx = 0;
+  prey.vy = 0;
+  prey.opacity = 0;
+  prey.cover = pointCoverDepth(prey.x, prey.y);
+  prey.coverId = undefined;
+  prey.activity = 'hide';
+  prey.activityTime = 0;
+  prey.targetId = predator.id;
+  predator.targetId = prey.id;
+  world.time = 0;
+  world.nextHuntAt = 999;
+  world.hunt = {
+    predatorId: predator.id,
+    preyId: prey.id,
+    preyKind: kind,
+    phase: 'recoverCaught',
+    elapsed: 0,
+    macroBacked: true,
+    consumedTick: 99,
+  };
+  return { s, world, preyId: prey.id };
+}
+
 {
   assert.equal(WILDLIFE_LABELS.wolf, '灰狼', 'species labels remain separate');
   assert.equal(WILDLIFE_ACTIVITY_LABELS.pounce, '扑击', 'activity labels export for renderer');
@@ -240,6 +286,51 @@ function pointCoverDepth(x, y) {
   }
   assert(escapedSeen, 'unbacked hunt visibly escapes before quiet');
   assert(quietAfterEscape, 'unbacked ambient hunt returns to quiet before the next natural cycle');
+}
+
+{
+  const samples = sampleWalkablePositions();
+  assert.equal(samples.length, 41, 'forced recovery samples cover forty-one walkable points');
+  const recoveries = [];
+  for (const kind of ['rabbit', 'deer']) {
+    for (const position of samples) {
+      const { s, world, preyId } = forceRecoverCaught(kind, position);
+      let maxJump = 0;
+      let openGroundFade = false;
+      let reachedCoverAt = null;
+      let finishedAt = null;
+      let previous = world.agents.find((a) => a.id === preyId);
+      let previousOpacity = previous.opacity;
+
+      for (let frame = 0; frame < 60 * 30; frame++) {
+        const t = frame / 60;
+        stepWildlife(world, 1 / 60, s);
+        const current = world.agents.find((a) => a.id === preyId);
+        maxJump = Math.max(maxJump, Math.hypot(current.x - previous.x, current.y - previous.y));
+        if (current.opacity > previousOpacity + 1e-6 && previousOpacity < 0.98 && (current.cover ?? 0) <= 0.55) {
+          openGroundFade = true;
+        }
+        if (reachedCoverAt == null && (current.cover ?? 0) > 0.65) reachedCoverAt = t;
+        if (!world.hunt) {
+          finishedAt = t;
+          break;
+        }
+        previous = current;
+        previousOpacity = current.opacity;
+      }
+
+      assert.equal(openGroundFade, false, `${kind} at ${position.x},${position.y} does not regain opacity outside cover`);
+      assert(reachedCoverAt != null, `${kind} at ${position.x},${position.y} reaches grass cover during recovery`);
+      assert(finishedAt != null, `${kind} at ${position.x},${position.y} clears recoverCaught within thirty seconds`);
+      assert(maxJump <= 0.32 / 60 + 0.001, `${kind} at ${position.x},${position.y} recovery has no teleport`);
+      recoveries.push(finishedAt);
+    }
+  }
+  console.log(
+    `forced recovery evidence: ${recoveries.length} samples cleared, slowest ${Math.max(...recoveries).toFixed(2)}s, median ${recoveries
+      .sort((a, b) => a - b)
+      [Math.floor(recoveries.length / 2)].toFixed(2)}s`,
+  );
 }
 
 {

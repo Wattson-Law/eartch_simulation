@@ -398,7 +398,7 @@ function updateHunt(world: WildlifeWorld, dt: number, predationEvent: PendingPre
     setActivity(prey, 'hide');
     predator.vx *= 0.75;
     predator.vy *= 0.75;
-    steerTo(prey, coverEntryPoint(prey), dt, speedFor(prey.kind, 'flee') * 0.6);
+    steerTo(prey, coverEntryPoint(prey), dt, recoveryCoverSpeed(prey));
     if ((prey.cover ?? 0) > 0.65 && hunt.elapsed > 1.1) {
       const exit = coverExitPoint(prey);
       prey.goalX = exit.x;
@@ -415,7 +415,7 @@ function updateHunt(world: WildlifeWorld, dt: number, predationEvent: PendingPre
     setActivity(prey, 'hide');
     predator.vx *= 0.75;
     predator.vy *= 0.75;
-    steerTo(prey, coverEntryPoint(prey), dt, speedFor(prey.kind, 'hide') * 0.55);
+    steerTo(prey, coverEntryPoint(prey), dt, recoveryCoverSpeed(prey));
     if ((prey.cover ?? 0) > 0.65 && hunt.elapsed > 1.1) {
       prey.opacity = approach(prey.opacity, 1, dt * 0.65);
       const exit = coverExitPoint(prey);
@@ -796,6 +796,10 @@ function speedFor(kind: WildlifeKind, activity: WildlifeActivity) {
   return 0;
 }
 
+function recoveryCoverSpeed(agent: WildlifeAgent) {
+  return speedFor(agent.kind, 'flee') * (agent.kind === 'deer' ? 0.68 : 0.62);
+}
+
 function gaitScale(kind: WildlifeKind, activity: WildlifeActivity) {
   const base = kind === 'rabbit' ? 18 : kind === 'wolf' ? 11 : 8;
   if (activity === 'chase' || activity === 'flee') {
@@ -817,14 +821,18 @@ function catchDistance(kind: WildlifeKind) {
 }
 
 function coverEntryPoint(agent: WildlifeAgent) {
-  const patch = nearestCoverPatch(agent.x, agent.y) ?? WILDLIFE_COVER_PATCHES[0]!;
-  return projectToWalkable(patch.x - patch.rx * 0.24, patch.y + patch.ry * 0.12);
+  return WILDLIFE_COVER_PATCHES.map((patch) => coverEntryForPatch(patch))
+    .sort((a, b) => routeDistance(agent.x, agent.y, a.x, a.y) - routeDistance(agent.x, agent.y, b.x, b.y))[0]!;
 }
 
 function coverExitPoint(agent: WildlifeAgent, preferredId?: (typeof WILDLIFE_COVER_PATCHES)[number]['id']) {
   const patch = (preferredId ? WILDLIFE_COVER_PATCHES.find((p) => p.id === preferredId) : nearestCoverPatch(agent.x, agent.y)) ?? WILDLIFE_COVER_PATCHES[0]!;
   const side = agent.x < patch.x ? -1 : 1;
   return projectToWalkable(patch.x + patch.rx * (0.9 * side), patch.y - patch.ry * 0.78);
+}
+
+function coverEntryForPatch(patch: (typeof WILDLIFE_COVER_PATCHES)[number]) {
+  return projectToWalkable(patch.x - patch.rx * 0.24, patch.y + patch.ry * 0.12);
 }
 
 function nearestCoverPatch(x: number, y: number) {
@@ -847,6 +855,21 @@ function coverDepth(x: number, y: number) {
 
 function normalizedCoverDistance(x: number, y: number, patch: (typeof WILDLIFE_COVER_PATCHES)[number]) {
   return Math.hypot((x - patch.x) / patch.rx, (y - patch.y) / patch.ry);
+}
+
+function routeDistance(ax: number, ay: number, bx: number, by: number) {
+  if (hasLineOfSight(ax, ay, bx, by)) return distance(ax, ay, bx, by);
+  const bridges = [
+    projectToWalkable(0.46, 0.665),
+    projectToWalkable(0.66, 0.665),
+    projectToWalkable(0.8, 0.68),
+  ];
+  let best = Number.POSITIVE_INFINITY;
+  for (const bridge of bridges) {
+    if (!hasLineOfSight(ax, ay, bridge.x, bridge.y) || !hasLineOfSight(bridge.x, bridge.y, bx, by)) continue;
+    best = Math.min(best, distance(ax, ay, bridge.x, bridge.y) + distance(bridge.x, bridge.y, bx, by));
+  }
+  return best;
 }
 
 function byId(world: WildlifeWorld, id: string) {
