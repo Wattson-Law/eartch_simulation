@@ -529,7 +529,7 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
         rippleCtx.clearRect(0, 0, w, h);
         rippleCtx.save();
         drawSceneFish(rippleCtx, w, h, elapsed, fishRoutes);
-        rippleCtx.strokeStyle = 'rgba(135,206,215,0.18)';
+        rippleCtx.strokeStyle = 'rgba(255,239,190,0.26)';
         rippleCtx.lineWidth = 3;
         for (let i = 0; i < 5; i++) {
           const y = h * (0.61 + ((i * 0.073 + elapsed * 0.012) % 0.34));
@@ -664,61 +664,67 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
 
       // —— 远山 ——
       const mt = groundColors(s.season, s.fire);
-      ctx.fillStyle = s.season === 'winter' ? '#78909c' : '#7e57c2';
-      ctx.globalAlpha = 0.35;
-      ctx.beginPath();
-      ctx.moveTo(0, h * 0.42);
-      ctx.lineTo(w * 0.15, h * 0.22);
-      ctx.lineTo(w * 0.28, h * 0.38);
-      ctx.lineTo(w * 0.45, h * 0.16);
-      ctx.lineTo(w * 0.62, h * 0.36);
-      ctx.lineTo(w * 0.78, h * 0.18);
-      ctx.lineTo(w, h * 0.34);
-      ctx.lineTo(w, h * 0.5);
-      ctx.lineTo(0, h * 0.5);
-      ctx.fill();
-      ctx.globalAlpha = 1;
+      if (!sceneImages.mountains) {
+        ctx.fillStyle = s.season === 'winter' ? '#78909c' : '#7e57c2';
+        ctx.globalAlpha = 0.35;
+        ctx.beginPath();
+        ctx.moveTo(0, h * 0.42);
+        ctx.lineTo(w * 0.15, h * 0.22);
+        ctx.lineTo(w * 0.28, h * 0.38);
+        ctx.lineTo(w * 0.45, h * 0.16);
+        ctx.lineTo(w * 0.62, h * 0.36);
+        ctx.lineTo(w * 0.78, h * 0.18);
+        ctx.lineTo(w, h * 0.34);
+        ctx.lineTo(w, h * 0.5);
+        ctx.lineTo(0, h * 0.5);
+        ctx.fill();
+        ctx.globalAlpha = 1;
 
-      // 雪顶
-      if (s.season === 'winter' || s.temperature < 5) {
-        ctx.fillStyle = 'rgba(255,255,255,0.85)';
-        ctx.beginPath();
-        ctx.moveTo(w * 0.45, h * 0.16);
-        ctx.lineTo(w * 0.48, h * 0.22);
-        ctx.lineTo(w * 0.42, h * 0.22);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.moveTo(w * 0.78, h * 0.18);
-        ctx.lineTo(w * 0.81, h * 0.24);
-        ctx.lineTo(w * 0.74, h * 0.24);
-        ctx.fill();
+        // 雪顶
+        if (s.season === 'winter' || s.temperature < 5) {
+          ctx.fillStyle = 'rgba(255,255,255,0.85)';
+          ctx.beginPath();
+          ctx.moveTo(w * 0.45, h * 0.16);
+          ctx.lineTo(w * 0.48, h * 0.22);
+          ctx.lineTo(w * 0.42, h * 0.22);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.moveTo(w * 0.78, h * 0.18);
+          ctx.lineTo(w * 0.81, h * 0.24);
+          ctx.lineTo(w * 0.74, h * 0.24);
+          ctx.fill();
+        }
+
       }
 
-      // 中景山丘
-      ctx.fillStyle = mt.far;
-      ctx.beginPath();
-      ctx.moveTo(0, h * 0.48);
-      ctx.lineTo(w * 0.2, h * 0.32);
-      ctx.lineTo(w * 0.4, h * 0.45);
-      ctx.lineTo(w * 0.55, h * 0.3);
-      ctx.lineTo(w * 0.75, h * 0.44);
-      ctx.lineTo(w, h * 0.34);
-      ctx.lineTo(w, h);
-      ctx.lineTo(0, h);
-      ctx.fill();
+      if (!sceneImages.meadow) {
+        // 中景山丘
+        ctx.fillStyle = mt.far;
+        ctx.beginPath();
+        ctx.moveTo(0, h * 0.48);
+        ctx.lineTo(w * 0.2, h * 0.32);
+        ctx.lineTo(w * 0.4, h * 0.45);
+        ctx.lineTo(w * 0.55, h * 0.3);
+        ctx.lineTo(w * 0.75, h * 0.44);
+        ctx.lineTo(w, h * 0.34);
+        ctx.lineTo(w, h);
+        ctx.lineTo(0, h);
+        ctx.fill();
 
-      // 近景草地
-      ctx.fillStyle = mt.near;
-      ctx.fillRect(0, h * 0.55, w, h * 0.45);
-      if (mt.carpet) {
-        ctx.fillStyle = mt.carpet;
-        ctx.fillRect(0, h * 0.58, w, h * 0.42);
-      }
+        // 近景草地
+        ctx.fillStyle = mt.near;
+        ctx.fillRect(0, h * 0.55, w, h * 0.45);
+        if (mt.carpet) {
+          ctx.fillStyle = mt.carpet;
+          ctx.fillRect(0, h * 0.58, w, h * 0.42);
+        }
 
-      if (!s.fire && s.grass > 2500) {
-        const carpet = Math.min(0.28, (s.grass - 2500) / 10000);
-        ctx.fillStyle = `rgba(102, 187, 106, ${carpet})`;
-        ctx.fillRect(0, h * 0.58, w, h * 0.42);
+        if (!s.fire && s.grass > 2500) {
+          const carpet = Math.min(0.28, (s.grass - 2500) / 10000);
+          ctx.fillStyle = `rgba(102, 187, 106, ${carpet})`;
+          ctx.fillRect(0, h * 0.58, w, h * 0.42);
+        }
+
       }
 
       // —— 间歇泉蒸汽 ——
@@ -892,8 +898,17 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
             if (Math.abs(prop.x - x) > prop.width * 0.62 + drawnHeight || prop.y < y - drawnHeight * 1.5 || prop.y - prop.height > y + drawnHeight * 0.15) continue;
             const occlusion = smoothstep((prop.y / h - agent.y + 0.018) / 0.036);
             if (occlusion <= 0) continue;
-            animalCtx.globalAlpha = occlusion;
+            animalCtx.save();
+            if (occlusion < 1) {
+              // As feet step in front of the plant, reveal the body upward.
+              // Leaves stay opaque instead of making the animal ghostlike.
+              const maskBottom = y - drawnHeight * 1.5 + occlusion * drawnHeight * 1.65;
+              animalCtx.beginPath();
+              animalCtx.rect(left, top, bufferW, Math.max(0, maskBottom - top));
+              animalCtx.clip();
+            }
             drawFoliage(animalCtx, prop);
+            animalCtx.restore();
           }
           animalCtx.restore();
           ctx.drawImage(animalCanvas, left, top, bufferW, bufferH);

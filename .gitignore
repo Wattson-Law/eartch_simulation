@@ -27,3 +27,7 @@ dist-ssr
 /.playwright-cli/
 /output/playwright/
 /artifacts/mobile-iteration-*.png
+
+# Offline asset processing
+__pycache__/
+*.py[cod]

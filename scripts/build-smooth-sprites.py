@@ -2,8 +2,9 @@
 """Build smoother local sprite sheets from existing transparent key poses.
 
 The generated frames keep every original key pose exactly at indices 0, 4, 8...
-and fill the in-between frames with source-prioritized, alpha-aware optical-flow
-warps. This is an offline asset processor; the app gains no runtime dependency.
+and fill the in-between frames with source-prioritized DIS optical-flow warps
+plus modest centroid compensation. This is an offline asset processor; the app
+gains no runtime dependency.
 """
 
 from __future__ import annotations
@@ -170,20 +171,6 @@ def translate_float(image: np.ndarray, dx: float, dy: float) -> np.ndarray:
     return np.stack(channels, axis=-1)
 
 
-def signed_distance(alpha: np.ndarray) -> np.ndarray:
-    mask = (alpha > 20).astype(np.uint8)
-    inside = cv2.distanceTransform(mask, cv2.DIST_L2, 5)
-    outside = cv2.distanceTransform(1 - mask, cv2.DIST_L2, 5)
-    return inside - outside
-
-
-def morphed_silhouette(a: np.ndarray, b: np.ndarray, t: float) -> np.ndarray:
-    sdf = signed_distance(a[..., 3]) * (1.0 - t) + signed_distance(b[..., 3]) * t
-    soft = np.clip((sdf + 2.5) / 5.0, 0.0, 1.0)
-    soft = cv2.GaussianBlur(soft.astype(np.float32), (0, 0), 0.7)
-    return np.clip(soft, 0.0, 1.0)[..., None]
-
-
 def interpolate_pair(a: np.ndarray, b: np.ndarray, t: float) -> np.ndarray:
     if t <= 0:
         return a.copy()
@@ -282,7 +269,7 @@ def update_manifest(manifest_path: Path, results: list[AnimationResult]) -> None
         entry["src"] = result.output.replace("\\", "/")
         entry["frames"] = result.frames
         entry["fps"] = result.fps
-        entry["method"] = "Source-prioritized optical-flow interpolation from 8 original key poses; every fourth frame preserves the original pose exactly"
+        entry["method"] = "Source-prioritized DIS optical-flow interpolation with centroid compensation from 8 original key poses; every fourth frame preserves the original pose exactly"
         entry["source"] = {
             "src": original_src,
             "frames": original_frames,
@@ -378,7 +365,7 @@ def write_report(results: list[AnimationResult], output_path: Path) -> None:
     payload = {
         "stepsPerKey": STEPS_PER_KEY,
         "frameSize": [FRAME_W, FRAME_H],
-        "method": "source-prioritized alpha-aware optical-flow interpolation from 8 original key poses",
+        "method": "source-prioritized DIS optical-flow interpolation with centroid compensation from 8 original key poses",
         "results": [
             {
                 "animal": r.animal,

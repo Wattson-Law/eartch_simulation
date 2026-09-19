@@ -44,7 +44,7 @@
           "x": 0.5,
           "y": 0.91015625
         },
-        "method": "Source-prioritized optical-flow interpolation from 8 original key poses; every fourth frame preserves the original pose exactly",
+        "method": "Source-prioritized DIS optical-flow interpolation with centroid compensation from 8 original key poses; every fourth frame preserves the original pose exactly",
         "source": {
           "src": "animals/wolf-walk.png",
           "frames": 8,
@@ -64,7 +64,7 @@
           "x": 0.5,
           "y": 0.91015625
         },
-        "method": "Source-prioritized optical-flow interpolation from 8 original key poses; every fourth frame preserves the original pose exactly",
+        "method": "Source-prioritized DIS optical-flow interpolation with centroid compensation from 8 original key poses; every fourth frame preserves the original pose exactly",
         "source": {
           "src": "animals/wolf-run.png",
           "frames": 8,
@@ -84,7 +84,7 @@
           "x": 0.5,
           "y": 0.91015625
         },
-        "method": "Source-prioritized optical-flow interpolation from 8 original key poses; every fourth frame preserves the original pose exactly",
+        "method": "Source-prioritized DIS optical-flow interpolation with centroid compensation from 8 original key poses; every fourth frame preserves the original pose exactly",
         "source": {
           "src": "animals/wolf-howl.png",
           "frames": 8,
@@ -120,7 +120,7 @@
           "x": 0.5,
           "y": 0.91015625
         },
-        "method": "Source-prioritized optical-flow interpolation from 8 original key poses; every fourth frame preserves the original pose exactly",
+        "method": "Source-prioritized DIS optical-flow interpolation with centroid compensation from 8 original key poses; every fourth frame preserves the original pose exactly",
         "source": {
           "src": "animals/elk-walk.png",
           "frames": 8,
@@ -140,7 +140,7 @@
           "x": 0.5,
           "y": 0.91015625
         },
-        "method": "Source-prioritized optical-flow interpolation from 8 original key poses; every fourth frame preserves the original pose exactly",
+        "method": "Source-prioritized DIS optical-flow interpolation with centroid compensation from 8 original key poses; every fourth frame preserves the original pose exactly",
         "source": {
           "src": "animals/elk-run.png",
           "frames": 8,
@@ -160,7 +160,7 @@
           "x": 0.5,
           "y": 0.91015625
         },
-        "method": "Source-prioritized optical-flow interpolation from 8 original key poses; every fourth frame preserves the original pose exactly",
+        "method": "Source-prioritized DIS optical-flow interpolation with centroid compensation from 8 original key poses; every fourth frame preserves the original pose exactly",
         "source": {
           "src": "animals/elk-graze.png",
           "frames": 8,
@@ -196,7 +196,7 @@
           "x": 0.5,
           "y": 0.91015625
         },
-        "method": "Source-prioritized optical-flow interpolation from 8 original key poses; every fourth frame preserves the original pose exactly",
+        "method": "Source-prioritized DIS optical-flow interpolation with centroid compensation from 8 original key poses; every fourth frame preserves the original pose exactly",
         "source": {
           "src": "animals/rabbit-hop.png",
           "frames": 8,
@@ -216,7 +216,7 @@
           "x": 0.5,
           "y": 0.91015625
         },
-        "method": "Source-prioritized optical-flow interpolation from 8 original key poses; every fourth frame preserves the original pose exactly",
+        "method": "Source-prioritized DIS optical-flow interpolation with centroid compensation from 8 original key poses; every fourth frame preserves the original pose exactly",
         "source": {
           "src": "animals/rabbit-run.png",
           "frames": 8,
@@ -236,7 +236,7 @@
           "x": 0.5,
           "y": 0.91015625
         },
-        "method": "Source-prioritized optical-flow interpolation from 8 original key poses; every fourth frame preserves the original pose exactly",
+        "method": "Source-prioritized DIS optical-flow interpolation with centroid compensation from 8 original key poses; every fourth frame preserves the original pose exactly",
         "source": {
           "src": "animals/rabbit-alert.png",
           "frames": 8,

@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "test": "node scripts/verify-sprite-frame-math.mjs && node scripts/verify-wildlife.mjs",
+    "test": "node scripts/verify-sprite-frame-math.mjs && node scripts/verify-wildlife.mjs && node scripts/verify-environment.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
