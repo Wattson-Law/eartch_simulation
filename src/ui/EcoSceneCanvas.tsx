@@ -3,9 +3,16 @@ import type { EcosystemState } from '../sim/types';
 import {
   ANIMAL_SHEETS,
   drawSheetFrame,
+  drawSheetFrameAnchored,
+  loadEcosystemManifest,
   loadImage,
   loadPlantImages,
+  type EcosystemAction,
+  type EcosystemAnimal,
+  type EcosystemManifest,
   type SheetMeta,
+  type SceneLayerKey,
+  type ScenePropMeta,
 } from '../assetsPaths';
 
 interface Props {
@@ -52,6 +59,21 @@ interface TooltipInfo {
 const MAX = { rabbit: 12, deer: 8, wolf: 6 } as const;
 const PLANT_CAP = { trees: 10, shrubs: 14, grass: 20 } as const;
 
+const PROP_ANCHORS: Record<string, [number, number]> = {
+  'pine-cluster': [0.11, 0.68],
+  pine: [0.86, 0.69],
+  aspen: [0.29, 0.67],
+  'golden-shrub': [0.76, 0.79],
+  willow: [0.61, 0.77],
+  'distant-pines': [0.47, 0.53],
+  'river-rocks': [0.59, 0.91],
+  'moss-rock': [0.72, 0.91],
+  'grass-daisies': [0.24, 0.91],
+  reeds: [0.66, 0.84],
+  'grass-flowers': [0.41, 0.91],
+  cloud: [0.75, 0.23],
+};
+
 const ACTIVITY_LABEL: Record<Activity, string> = {
   idle: '闲逛',
   eating: '觅食中',
@@ -91,7 +113,7 @@ function identityFor(kind: CritterKind, i: number): Pick<Critter, 'id' | 'displa
   if (kind === 'deer') {
     return {
       id: `elk-${num}`,
-      displayName: `拉马谷 ${num} 号麋鹿`,
+      displayName: `拉马谷 ${num} 号美洲赤鹿`,
       role: '草食巡游者',
       mood: seeded(i, 8) > 0.5 ? '警觉' : '安静',
     };
@@ -111,17 +133,19 @@ function drawSprite(
   y: number,
   drawH: number,
   flipX = false,
+  sway = 0,
 ) {
   const aspect = img.naturalWidth / Math.max(1, img.naturalHeight);
   const dw = drawH * aspect;
   const dh = drawH;
   ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(sway);
   if (flipX) {
-    ctx.translate(x + dw / 2, y);
     ctx.scale(-1, 1);
     ctx.drawImage(img, -dw / 2, -dh, dw, dh);
   } else {
-    ctx.drawImage(img, x - dw / 2, y - dh, dw, dh);
+    ctx.drawImage(img, -dw / 2, -dh, dw, dh);
   }
   ctx.restore();
 }
@@ -161,8 +185,18 @@ export function EcoSceneCanvas({ state }: Props) {
     let raf = 0;
     let cancelled = false;
     const t0 = performance.now();
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+    let animationSeconds = 0;
+    let previousNow = t0;
 
     const sheets: Partial<Record<keyof typeof ANIMAL_SHEETS, HTMLImageElement>> = {};
+    const generatedSheets: Partial<Record<string, { img: HTMLImageElement; meta: SheetMeta }>> = {};
+    const sceneImages: Partial<Record<SceneLayerKey, { img: HTMLImageElement; src: string }>> = {};
+    const generatedProps: { id: string; meta: ScenePropMeta; img: HTMLImageElement }[] = [];
+    let manifest: EcosystemManifest | null = null;
+    let waterMask: HTMLImageElement | null = null;
+    const rippleCanvas = document.createElement('canvas');
+    const rippleCtx = rippleCanvas.getContext('2d');
     const plants = {
       grass: [] as HTMLImageElement[],
       shrubs: [] as HTMLImageElement[],
@@ -170,6 +204,8 @@ export function EcoSceneCanvas({ state }: Props) {
     };
 
     void (async () => {
+      // Start legacy loads immediately so a slow generated pack never leaves
+      // the scene without animals during its first paint.
       const entries = Object.entries(ANIMAL_SHEETS) as [
         keyof typeof ANIMAL_SHEETS,
         SheetMeta,
@@ -183,6 +219,68 @@ export function EcoSceneCanvas({ state }: Props) {
           }
         }),
       );
+    })();
+
+    void (async () => {
+      manifest = await loadEcosystemManifest();
+      if (manifest?.scene) {
+        const sceneEntries = Object.entries(manifest.scene.layers) as [SceneLayerKey, { src: string }][];
+        await Promise.all(
+          sceneEntries.map(async ([key, layer]) => {
+            try {
+              sceneImages[key] = { img: await loadImage(layer.src), src: layer.src };
+            } catch {
+              /* missing layer keeps the procedural counterpart */
+            }
+          }),
+        );
+        if (manifest.scene.waterMask) {
+          try {
+            waterMask = await loadImage(manifest.scene.waterMask);
+          } catch {
+            waterMask = null;
+          }
+        }
+      }
+      if (manifest?.props) {
+        await Promise.all(
+          Object.entries(manifest.props).map(async ([id, meta]) => {
+            try {
+              generatedProps.push({ id, meta, img: await loadImage(meta.src) });
+            } catch {
+              /* old plant sprites remain available when no generated prop loads */
+            }
+          }),
+        );
+        generatedProps.sort((a, b) => a.id.localeCompare(b.id));
+      }
+      if (manifest) {
+        const generatedEntries: [EcosystemAnimal, EcosystemAction][] = [
+          ['wolf', 'idle'],
+          ['wolf', 'walk'],
+          ['wolf', 'run'],
+          ['wolf', 'howl'],
+          ['elk', 'idle'],
+          ['elk', 'walk'],
+          ['elk', 'run'],
+          ['elk', 'graze'],
+          ['rabbit', 'idle'],
+          ['rabbit', 'hop'],
+          ['rabbit', 'run'],
+          ['rabbit', 'alert'],
+        ];
+        await Promise.all(
+          generatedEntries.map(async ([animal, action]) => {
+            const meta = manifest?.animals[animal]?.[action];
+            if (!meta) return;
+            try {
+              generatedSheets[`${animal}:${action}`] = { img: await loadImage(meta.src), meta };
+            } catch {
+              /* old ScratchIO sheet remains the fallback */
+            }
+          }),
+        );
+      }
       try {
         const loaded = await loadPlantImages();
         plants.grass = loaded.grass;
@@ -194,6 +292,128 @@ export function EcoSceneCanvas({ state }: Props) {
     })();
 
     const crittersRef = { list: [] as Critter[] };
+
+    const generatedSheet = (kind: CritterKind, action: EcosystemAction) => {
+      const animal: EcosystemAnimal = kind === 'deer' ? 'elk' : kind;
+      return generatedSheets[`${animal}:${action}`];
+    };
+
+    const drawCritterSheet = (
+      ctx: CanvasRenderingContext2D,
+      kind: CritterKind,
+      action: EcosystemAction,
+      legacyKey: keyof typeof ANIMAL_SHEETS,
+      frameTime: number,
+      x: number,
+      y: number,
+      flip: boolean,
+    ) => {
+      const generated = generatedSheet(kind, action);
+      const fallbackImage = sheets[legacyKey];
+      const meta = generated?.meta ?? ANIMAL_SHEETS[legacyKey];
+      const img = generated?.img ?? fallbackImage;
+      if (!img) return false;
+      const fps = generated?.meta.fps ?? 8;
+      const frame = frameTime * fps;
+      const desiredHeight = kind === 'rabbit' ? 56 : kind === 'deer' ? 92 : 82;
+      const scale = generated ? desiredHeight / meta.frameH : kind === 'rabbit' ? 1.35 : kind === 'deer' ? 0.95 : 1.15;
+      if (generated) {
+        drawSheetFrameAnchored(ctx, img, meta, frame, x, y, scale, flip);
+      } else {
+        drawSheetFrame(ctx, img, meta, frame, x, y, scale, flip);
+      }
+      return true;
+    };
+
+    const drawSceneLayer = (ctx: CanvasRenderingContext2D, key: SceneLayerKey, w: number, h: number) => {
+      const entry = sceneImages[key];
+      if (!entry) return false;
+      const sourceW = manifest?.scene?.width ?? 2048;
+      const sourceH = manifest?.scene?.height ?? 1152;
+      // Contain keeps the generated composition undistorted on narrow panels.
+      const scale = Math.min(w / sourceW, h / sourceH);
+      const dw = sourceW * scale;
+      const dh = sourceH * scale;
+      ctx.drawImage(entry.img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+      return true;
+    };
+
+    const drawGeneratedProps = (ctx: CanvasRenderingContext2D, w: number, h: number, elapsed: number) => {
+      const sourceW = manifest?.scene?.width ?? 2048;
+      const sourceH = manifest?.scene?.height ?? 1152;
+      const scale = Math.min(w / sourceW, h / sourceH);
+      const drawW = sourceW * scale;
+      const drawH = sourceH * scale;
+      const offsetX = (w - drawW) / 2;
+      const offsetY = (h - drawH) / 2;
+      for (const [index, prop] of generatedProps.entries()) {
+        const [anchorX, anchorY] = PROP_ANCHORS[prop.id] ?? [0.5, 0.86];
+        const propW = prop.meta.width * scale;
+        const propH = prop.meta.height * scale;
+        const baseX = offsetX + anchorX * drawW;
+        const baseY = offsetY + anchorY * drawH;
+        const isPlant = ['pine-cluster', 'pine', 'aspen', 'golden-shrub', 'willow', 'grass-daisies', 'reeds', 'grass-flowers'].includes(prop.id);
+        const sway = isPlant ? Math.sin(elapsed * 0.8 + index * 0.9) * 0.02 : 0;
+        const drift = prop.id === 'cloud' ? Math.sin(elapsed * 0.08 + index) * drawW * 0.012 : 0;
+        ctx.save();
+        ctx.translate(baseX + drift, baseY);
+        ctx.rotate(sway);
+        ctx.drawImage(prop.img, -propW / 2, -propH, propW, propH);
+        ctx.restore();
+      }
+    };
+
+    const drawWaterMotion = (ctx: CanvasRenderingContext2D, w: number, h: number, elapsed: number) => {
+      if (waterMask && rippleCtx) {
+        const width = Math.max(1, Math.floor(w * dpr));
+        const height = Math.max(1, Math.floor(h * dpr));
+        if (rippleCanvas.width !== width || rippleCanvas.height !== height) {
+          rippleCanvas.width = width;
+          rippleCanvas.height = height;
+        }
+        rippleCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        rippleCtx.clearRect(0, 0, w, h);
+        rippleCtx.save();
+        rippleCtx.strokeStyle = 'rgba(255,255,255,0.42)';
+        rippleCtx.lineWidth = 1.5;
+        for (let i = 0; i < 9; i++) {
+          const y = h * (0.58 + ((i * 0.047 + elapsed * 0.025) % 0.37));
+          const x = w * (0.48 + ((i * 0.073 + elapsed * 0.018) % 0.22));
+          rippleCtx.beginPath();
+          rippleCtx.moveTo(x, y);
+          rippleCtx.quadraticCurveTo(x + w * 0.025, y - 2, x + w * 0.05, y);
+          rippleCtx.stroke();
+        }
+        const sourceW = manifest?.scene?.width ?? 2048;
+        const sourceH = manifest?.scene?.height ?? 1152;
+        const scale = Math.min(w / sourceW, h / sourceH);
+        const dw = sourceW * scale;
+        const dh = sourceH * scale;
+        rippleCtx.globalCompositeOperation = 'destination-in';
+        rippleCtx.drawImage(waterMask, (w - dw) / 2, (h - dh) / 2, dw, dh);
+        rippleCtx.restore();
+        ctx.drawImage(rippleCanvas, 0, 0, w, h);
+        return;
+      }
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(w * 0.52, h * 0.56);
+      ctx.quadraticCurveTo(w * 0.48, h * 0.72, w * 0.58, h);
+      ctx.lineTo(w * 0.72, h);
+      ctx.quadraticCurveTo(w * 0.56, h * 0.72, w * 0.64, h * 0.56);
+      ctx.clip();
+      ctx.strokeStyle = 'rgba(255,255,255,0.42)';
+      ctx.lineWidth = 1.5;
+      for (let i = 0; i < 9; i++) {
+        const y = h * (0.58 + ((i * 0.047 + elapsed * 0.025) % 0.37));
+        const x = w * (0.48 + ((i * 0.073 + elapsed * 0.018) % 0.22));
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.quadraticCurveTo(x + w * 0.025, y - 2, x + w * 0.05, y);
+        ctx.stroke();
+      }
+      ctx.restore();
+    };
 
     const rebuildCritters = (w: number, h: number, s: EcosystemState) => {
       const rabbitN = Math.min(MAX.rabbit, Math.max(0, Math.ceil(s.rabbits / 50)));
@@ -297,7 +517,11 @@ export function EcoSceneCanvas({ state }: Props) {
 
     const paint = (now: number) => {
       if (cancelled) return;
+      const delta = Math.min(0.1, Math.max(0, (now - previousNow) / 1000));
+      previousNow = now;
       const s = stateRef.current;
+      if (!s.paused && !reducedMotion) animationSeconds += delta;
+      const elapsed = animationSeconds;
       const rect = canvas.getBoundingClientRect();
       const w = rect.width;
       const h = rect.height;
@@ -308,6 +532,7 @@ export function EcoSceneCanvas({ state }: Props) {
         rebuildCritters(w, h, s);
       }
 
+      const hasSceneArt = Object.keys(sceneImages).length > 0;
       const skies: Record<string, [string, string]> = {
         spring: ['#b3e5fc', '#e8f5e9'],
         summer: ['#4fc3f7', '#fff59d'],
@@ -381,7 +606,6 @@ export function EcoSceneCanvas({ state }: Props) {
       }
 
       // —— 间歇泉蒸汽 ——
-      const elapsed = (now - t0) / 1000;
       const steamX = w * 0.22;
       const steamY = h * 0.5;
       for (let i = 0; i < 4; i++) {
@@ -423,11 +647,26 @@ export function EcoSceneCanvas({ state }: Props) {
       ctx.quadraticCurveTo(w * 0.54, h * 0.75, w * 0.62, h * 0.95);
       ctx.stroke();
 
+      // Generated layers replace their matching procedural counterpart while
+      // any missing file remains covered by the original drawing above.
+      if (hasSceneArt) {
+        for (const key of ['sky', 'mountains', 'meadow', 'forestBack', 'river'] as const) {
+          drawSceneLayer(ctx, key, w, h);
+        }
+        drawWaterMotion(ctx, w, h, elapsed);
+      }
+
       const { treeN, shrubN, grassN } = plantCounts(s);
       const hasTrees = plants.trees.length > 0;
       const hasShrubs = plants.shrubs.length > 0;
       const hasGrass = plants.grass.length > 0;
       const plantTips: PlantTip[] = [];
+      const generatedPropIds = new Set(generatedProps.map((prop) => prop.id));
+      const hasGeneratedTrees = ['pine-cluster', 'pine', 'aspen', 'distant-pines'].some((id) => generatedPropIds.has(id));
+      const hasGeneratedShrubs = ['golden-shrub', 'willow'].some((id) => generatedPropIds.has(id));
+      const hasGeneratedGrass = ['grass-daisies', 'reeds', 'grass-flowers'].some((id) => generatedPropIds.has(id));
+
+      if (generatedProps.length > 0) drawGeneratedProps(ctx, w, h, elapsed);
 
       ctx.save();
       if (s.fire) {
@@ -440,25 +679,25 @@ export function EcoSceneCanvas({ state }: Props) {
         ctx.filter = 'brightness(1.06) saturate(1.15)';
       }
 
-      for (let i = 0; i < treeN; i++) {
+      if (!hasGeneratedTrees) for (let i = 0; i < treeN; i++) {
         const tx = 24 + seeded(i, 41) * (w - 48);
         const ty = h * 0.52 + seeded(i, 42) * h * 0.08;
         const size = 48 + seeded(i, 43) * 36;
         if (hasTrees) {
           const img = plants.trees[i % plants.trees.length]!;
-          drawSprite(ctx, img, tx, ty, size, seeded(i, 44) > 0.5);
+          drawSprite(ctx, img, tx, ty, size, seeded(i, 44) > 0.5, Math.sin(elapsed * 0.65 + i) * 0.018);
         } else {
           drawPlantBlob(tx, ty - size * 0.3, size * 0.35, s.fire ? '#a1887f' : '#43a047');
         }
       }
 
-      for (let i = 0; i < shrubN; i++) {
+      if (!hasGeneratedShrubs) for (let i = 0; i < shrubN; i++) {
         const sx = 20 + seeded(i, 51) * (w - 40);
         const sy = h * 0.58 + seeded(i, 52) * h * 0.12;
         const size = 28 + seeded(i, 53) * 22;
         if (hasShrubs) {
           const img = plants.shrubs[i % plants.shrubs.length]!;
-          drawSprite(ctx, img, sx, sy, size, seeded(i, 54) > 0.5);
+          drawSprite(ctx, img, sx, sy, size, seeded(i, 54) > 0.5, Math.sin(elapsed * 0.9 + i * 0.7) * 0.024);
         } else {
           drawPlantBlob(sx, sy - 8, 14 + (i % 3) * 3, s.fire ? '#a1887f' : '#66bb6a');
         }
@@ -477,13 +716,13 @@ export function EcoSceneCanvas({ state }: Props) {
         }
       }
 
-      for (let i = 0; i < grassN; i++) {
+      if (!hasGeneratedGrass) for (let i = 0; i < grassN; i++) {
         const gx = 12 + seeded(i, 61) * (w - 24);
         const gy = h * 0.7 + seeded(i, 62) * h * 0.22;
         const size = 16 + seeded(i, 63) * 18;
         if (hasGrass) {
           const img = plants.grass[i % plants.grass.length]!;
-          drawSprite(ctx, img, gx, gy, size, seeded(i, 64) > 0.5);
+          drawSprite(ctx, img, gx, gy, size, seeded(i, 64) > 0.5, Math.sin(elapsed * 1.2 + i * 0.5) * 0.035);
         } else {
           ctx.fillStyle = s.season === 'winter' ? '#b0bec5' : '#7cb342';
           ctx.fillRect(gx, gy - 10, 2, 8 + seeded(i, 33) * 6);
@@ -514,49 +753,36 @@ export function EcoSceneCanvas({ state }: Props) {
         const wander = Math.sin(elapsed * c.speed * mul + c.phase) * (c.activity === 'fleeing' ? 18 : 12);
         const x = c.x + wander;
         const y = c.y + bob;
-        const frameT = elapsed * (c.kind === 'rabbit' ? 8 : 6) * mul + c.phase;
+        const frameT = elapsed * mul + c.phase * 0.1;
         c.hitX = x;
         c.hitY = y - 12;
         c.hitR = c.kind === 'rabbit' ? 16 : 22;
 
         if (c.kind === 'rabbit') {
-          const key = sheets.rabbitHop
-            ? 'rabbitHop'
-            : sheets.rabbitIdle
-              ? 'rabbitIdle'
-              : sheets.rabbitRun
-                ? 'rabbitRun'
-                : null;
-          if (key) {
-            drawSheetFrame(ctx, sheets[key]!, ANIMAL_SHEETS[key], Math.floor(frameT), x, y, 1.35, c.flip);
-          } else {
+          const action: EcosystemAction = c.activity === 'fleeing' ? 'run' : c.activity === 'alert' ? 'alert' : 'idle';
+          const legacyKey = action === 'run' ? 'rabbitRun' : action === 'alert' ? 'rabbitAlert' : 'rabbitIdle';
+          if (!drawCritterSheet(ctx, c.kind, action, legacyKey, frameT, x, y, c.flip)) {
             ctx.font = '16px serif';
             ctx.fillText('🐇', x, y + 16);
           }
         } else if (c.kind === 'deer') {
-          const key = sheets.deerWalk
-            ? 'deerWalk'
-            : sheets.deerIdle
-              ? 'deerIdle'
-              : sheets.deerRun
-                ? 'deerRun'
-                : null;
-          if (key) {
-            drawSheetFrame(ctx, sheets[key]!, ANIMAL_SHEETS[key], Math.floor(frameT), x, y, 0.95, c.flip);
-          } else {
+          const action: EcosystemAction = c.activity === 'eating' ? 'graze' : c.activity === 'fleeing' ? 'run' : c.activity === 'idle' ? 'idle' : 'walk';
+          const legacyKey = action === 'run' ? 'elkRun' : action === 'graze' || action === 'idle' ? 'elkIdle' : 'elkWalk';
+          if (!drawCritterSheet(ctx, c.kind, action, legacyKey, frameT, x, y, c.flip)) {
             ctx.font = '20px serif';
             ctx.fillText('🦌', x, y + 20);
           }
         } else {
-          const key = sheets.wolfWalk ? 'wolfWalk' : sheets.wolfRun ? 'wolfRun' : null;
-          if (key) {
-            drawSheetFrame(ctx, sheets[key]!, ANIMAL_SHEETS[key], Math.floor(frameT), x, y, 1.15, c.flip);
-          } else {
+          const action: EcosystemAction = c.activity === 'fleeing' ? 'run' : c.activity === 'alert' ? 'howl' : 'idle';
+          const legacyKey = action === 'run' ? 'wolfRun' : action === 'howl' ? 'wolfHowl' : 'wolfIdle';
+          if (!drawCritterSheet(ctx, c.kind, action, legacyKey, frameT, x, y, c.flip)) {
             ctx.font = '18px serif';
             ctx.fillText('🐺', x, y + 18);
           }
         }
       }
+
+      if (hasSceneArt) drawSceneLayer(ctx, 'foreground', w, h);
 
       hitRef.current = { critters: crittersRef.list, plants: plantTips };
 

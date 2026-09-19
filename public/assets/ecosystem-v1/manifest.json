@@ -1,0 +1,288 @@
+{
+  "version": "1.0.0",
+  "title": "Yellowstone Storybook Ecosystem",
+  "generatedAt": "2026-09-19",
+  "provenance": {
+    "endpoint": "https://api.b4im.com/v1",
+    "model": "gpt-image-2",
+    "note": "AI raster artwork plus documented local compositing/animation. No external CC0 license inferred."
+  },
+  "earth": {
+    "atlas": "earth/rotation-atlas.png",
+    "frames": 48,
+    "columns": 8,
+    "rows": 6,
+    "frameW": 384,
+    "frameH": 384,
+    "fps": 8
+  },
+  "animals": {
+    "wolf": {
+      "idle": {
+        "src": "animals/wolf-idle.png",
+        "frameW": 384,
+        "frameH": 256,
+        "frames": 8,
+        "fps": 6,
+        "loop": true,
+        "facing": "right",
+        "anchor": {
+          "x": 0.5,
+          "y": 0.91015625
+        },
+        "method": "Approved static character; local 0.6% breathing transform, not AI regenerated poses"
+      },
+      "walk": {
+        "src": "animals/wolf-walk.png",
+        "frameW": 384,
+        "frameH": 256,
+        "frames": 8,
+        "fps": 10,
+        "loop": true,
+        "facing": "right",
+        "anchor": {
+          "x": 0.5,
+          "y": 0.91015625
+        },
+        "method": "AI generated eight key poses; local alpha cleanup, fixed-scale extraction and ground-anchor normalization"
+      },
+      "run": {
+        "src": "animals/wolf-run.png",
+        "frameW": 384,
+        "frameH": 256,
+        "frames": 8,
+        "fps": 14,
+        "loop": true,
+        "facing": "right",
+        "anchor": {
+          "x": 0.5,
+          "y": 0.91015625
+        },
+        "method": "AI generated eight key poses; local alpha cleanup, fixed-scale extraction and ground-anchor normalization"
+      },
+      "howl": {
+        "src": "animals/wolf-howl.png",
+        "frameW": 384,
+        "frameH": 256,
+        "frames": 8,
+        "fps": 6,
+        "loop": true,
+        "facing": "right",
+        "anchor": {
+          "x": 0.5,
+          "y": 0.91015625
+        },
+        "method": "AI generated eight key poses; local alpha cleanup, fixed-scale extraction and ground-anchor normalization"
+      }
+    },
+    "elk": {
+      "idle": {
+        "src": "animals/elk-idle.png",
+        "frameW": 384,
+        "frameH": 256,
+        "frames": 8,
+        "fps": 6,
+        "loop": true,
+        "facing": "right",
+        "anchor": {
+          "x": 0.5,
+          "y": 0.91015625
+        },
+        "method": "Approved static character; local 0.6% breathing transform, not AI regenerated poses"
+      },
+      "walk": {
+        "src": "animals/elk-walk.png",
+        "frameW": 384,
+        "frameH": 256,
+        "frames": 8,
+        "fps": 10,
+        "loop": true,
+        "facing": "right",
+        "anchor": {
+          "x": 0.5,
+          "y": 0.91015625
+        },
+        "method": "AI generated eight key poses; local alpha cleanup, fixed-scale extraction and ground-anchor normalization"
+      },
+      "run": {
+        "src": "animals/elk-run.png",
+        "frameW": 384,
+        "frameH": 256,
+        "frames": 8,
+        "fps": 14,
+        "loop": true,
+        "facing": "right",
+        "anchor": {
+          "x": 0.5,
+          "y": 0.91015625
+        },
+        "method": "AI generated eight key poses; local alpha cleanup, fixed-scale extraction and ground-anchor normalization"
+      },
+      "graze": {
+        "src": "animals/elk-graze.png",
+        "frameW": 384,
+        "frameH": 256,
+        "frames": 8,
+        "fps": 6,
+        "loop": true,
+        "facing": "right",
+        "anchor": {
+          "x": 0.5,
+          "y": 0.91015625
+        },
+        "method": "AI generated eight key poses; local alpha cleanup, fixed-scale extraction and ground-anchor normalization"
+      }
+    },
+    "rabbit": {
+      "idle": {
+        "src": "animals/rabbit-idle.png",
+        "frameW": 384,
+        "frameH": 256,
+        "frames": 8,
+        "fps": 6,
+        "loop": true,
+        "facing": "right",
+        "anchor": {
+          "x": 0.5,
+          "y": 0.91015625
+        },
+        "method": "Approved static character; local 0.6% breathing transform, not AI regenerated poses"
+      },
+      "hop": {
+        "src": "animals/rabbit-hop.png",
+        "frameW": 384,
+        "frameH": 256,
+        "frames": 8,
+        "fps": 10,
+        "loop": true,
+        "facing": "right",
+        "anchor": {
+          "x": 0.5,
+          "y": 0.91015625
+        },
+        "method": "AI generated eight key poses; local alpha cleanup, fixed-scale extraction and ground-anchor normalization"
+      },
+      "run": {
+        "src": "animals/rabbit-run.png",
+        "frameW": 384,
+        "frameH": 256,
+        "frames": 8,
+        "fps": 14,
+        "loop": true,
+        "facing": "right",
+        "anchor": {
+          "x": 0.5,
+          "y": 0.91015625
+        },
+        "method": "AI generated eight key poses; local alpha cleanup, fixed-scale extraction and ground-anchor normalization"
+      },
+      "alert": {
+        "src": "animals/rabbit-alert.png",
+        "frameW": 384,
+        "frameH": 256,
+        "frames": 8,
+        "fps": 6,
+        "loop": true,
+        "facing": "right",
+        "anchor": {
+          "x": 0.5,
+          "y": 0.91015625
+        },
+        "method": "AI generated eight key poses; local alpha cleanup, fixed-scale extraction and ground-anchor normalization"
+      }
+    }
+  },
+  "scene": {
+    "width": 2048,
+    "height": 1152,
+    "layers": {
+      "sky": {
+        "src": "layers/sky.png",
+        "alpha": false
+      },
+      "mountains": {
+        "src": "layers/mountains.png",
+        "alpha": true
+      },
+      "meadow": {
+        "src": "layers/meadow.png",
+        "alpha": true
+      },
+      "forestBack": {
+        "src": "layers/forest-back.png",
+        "alpha": true
+      },
+      "river": {
+        "src": "layers/river.png",
+        "alpha": true
+      },
+      "foreground": {
+        "src": "layers/foreground.png",
+        "alpha": true
+      }
+    },
+    "waterMask": "layers/water-mask.png"
+  },
+  "props": {
+    "aspen": {
+      "src": "props/aspen.png",
+      "width": 383,
+      "height": 454
+    },
+    "cloud": {
+      "src": "props/cloud.png",
+      "width": 476,
+      "height": 241
+    },
+    "distant-pines": {
+      "src": "props/distant-pines.png",
+      "width": 464,
+      "height": 359
+    },
+    "golden-shrub": {
+      "src": "props/golden-shrub.png",
+      "width": 464,
+      "height": 290
+    },
+    "grass-daisies": {
+      "src": "props/grass-daisies.png",
+      "width": 462,
+      "height": 364
+    },
+    "grass-flowers": {
+      "src": "props/grass-flowers.png",
+      "width": 471,
+      "height": 294
+    },
+    "moss-rock": {
+      "src": "props/moss-rock.png",
+      "width": 482,
+      "height": 290
+    },
+    "pine-cluster": {
+      "src": "props/pine-cluster.png",
+      "width": 429,
+      "height": 426
+    },
+    "pine": {
+      "src": "props/pine.png",
+      "width": 255,
+      "height": 485
+    },
+    "reeds": {
+      "src": "props/reeds.png",
+      "width": 443,
+      "height": 415
+    },
+    "river-rocks": {
+      "src": "props/river-rocks.png",
+      "width": 480,
+      "height": 258
+    },
+    "willow": {
+      "src": "props/willow.png",
+      "width": 462,
+      "height": 328
+    }
+  }
+}

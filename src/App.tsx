@@ -11,13 +11,21 @@ import { ChatPanel, initialChatMessages, type ChatMessage } from './ui/ChatPanel
 import { PredationAnimation } from './ui/PredationAnimation';
 import { Disclaimer } from './ui/Disclaimer';
 import { CausalCascadePanel } from './ui/CausalCascadePanel';
+import { AssetGallery } from './ui/AssetGallery';
 import './App.css';
 
-type View = 'globe' | 'eco';
+type View = 'globe' | 'eco' | 'assets';
+
+function initialView(): View {
+  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('view') === 'assets') {
+    return 'assets';
+  }
+  return 'globe';
+}
 
 export default function App() {
   const [state, setState] = useState<EcosystemState>(() => createInitialState());
-  const [view, setView] = useState<View>('globe');
+  const [view, setView] = useState<View>(() => initialView());
   const [messages, setMessages] = useState<ChatMessage[]>(() => initialChatMessages());
   const [predationAnim, setPredationAnim] = useState(false);
   const [preyKind, setPreyKind] = useState<'rabbits' | 'elk'>('rabbits');
@@ -101,6 +109,8 @@ export default function App() {
         <section className="stage">
           {view === 'globe' ? (
             <GlobeCanvas onEnterYellowstone={enterYellowstone} />
+          ) : view === 'assets' ? (
+            <AssetGallery onBack={() => setView('eco')} />
           ) : (
             <EcoView
               state={state}
@@ -109,11 +119,13 @@ export default function App() {
               hasCascade={cascade != null}
             />
           )}
-          <PredationAnimation
-            active={predationAnim}
-            preyLabel={preyKind}
-            onDone={() => setPredationAnim(false)}
-          />
+          {view !== 'assets' && (
+            <PredationAnimation
+              active={predationAnim}
+              preyLabel={preyKind}
+              onDone={() => setPredationAnim(false)}
+            />
+          )}
           <CausalCascadePanel
             cascade={cascade}
             open={cascadeOpen}

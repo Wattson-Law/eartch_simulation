@@ -41,7 +41,7 @@ export function SpeciesPanel({ state }: Props) {
       },
     },
     {
-      label: '麋鹿',
+      label: '美洲赤鹿',
       value: Math.round(state.elk),
       color: '#8d6e63',
       sheet: {

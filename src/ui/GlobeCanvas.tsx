@@ -1,9 +1,12 @@
 import { useEffect, useRef } from 'react';
 import {
+  drawEarthAtlasFrame,
+  loadEcosystemManifest,
   PLANET_EARTH,
   PIXEL_EARTH_FRAME_COUNT,
   loadImage,
   pixelEarthFrame,
+  type EarthAtlasMeta,
 } from '../assetsPaths';
 
 interface Props {
@@ -26,11 +29,24 @@ export function GlobeCanvas({ onEnterYellowstone }: Props) {
     let raf = 0;
     let cancelled = false;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+    let animationSeconds = 0;
+    let previousNow = performance.now();
 
     const kenney = { img: null as HTMLImageElement | null };
     const pixelFrames: HTMLImageElement[] = [];
+    const atlas = { img: null as HTMLImageElement | null, meta: null as EarthAtlasMeta | null };
 
     void (async () => {
+      const manifest = await loadEcosystemManifest();
+      if (manifest?.earth) {
+        try {
+          atlas.img = await loadImage(manifest.earth.atlas);
+          atlas.meta = manifest.earth;
+        } catch {
+          /* keep legacy fallbacks */
+        }
+      }
       try {
         kenney.img = await loadImage(PLANET_EARTH);
       } catch {
@@ -91,9 +107,11 @@ export function GlobeCanvas({ onEnterYellowstone }: Props) {
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.clip();
 
-      if (kenney.img?.complete && kenney.img.naturalWidth > 0) {
+      if (atlas.img?.complete && atlas.meta) {
+        ctx.imageSmoothingEnabled = true;
+        drawEarthAtlasFrame(ctx, atlas.img, atlas.meta, animationSeconds * (atlas.meta.fps ?? 8), cx - r, cy - r, r * 2, r * 2);
+      } else if (kenney.img?.complete && kenney.img.naturalWidth > 0) {
         ctx.translate(cx, cy);
-        ctx.rotate(angleRef.current * 0.35);
         const size = r * 2.15;
         ctx.imageSmoothingEnabled = true;
         ctx.drawImage(kenney.img, -size / 2, -size / 2, size, size);
@@ -138,8 +156,11 @@ export function GlobeCanvas({ onEnterYellowstone }: Props) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     };
 
-    const draw = () => {
+    const draw = (now: number) => {
       if (cancelled) return;
+      const delta = Math.min(0.1, Math.max(0, (now - previousNow) / 1000));
+      previousNow = now;
+      if (!reducedMotion) animationSeconds += delta;
       const rect = canvas.getBoundingClientRect();
       const w = rect.width;
       const h = rect.height;
@@ -181,8 +202,10 @@ export function GlobeCanvas({ onEnterYellowstone }: Props) {
       ctx.fillStyle = '#a8c0d8';
       ctx.fillText('我做了一个存活在电脑里的地球', cx, 56);
 
-      angleRef.current += 0.008;
-      frameRef.current += 0.12;
+      if (!reducedMotion) {
+        angleRef.current += delta * 0.48;
+        frameRef.current += delta * 7.2;
+      }
       raf = requestAnimationFrame(draw);
     };
 

@@ -8,6 +8,179 @@ export function assetUrl(path: string): string {
 export const PLANET_EARTH = assetUrl('assets/planets/earth.png');
 export const PLANET_EARTH_ALT = assetUrl('assets/planets/earth_alt.png');
 
+/**
+ * Artwork metadata used by the generated Yellowstone pack.  The pack is
+ * optional at runtime: all consumers keep their original fallback assets.
+ */
+export interface SpriteAnchor {
+  x: number;
+  y: number;
+}
+
+export interface SheetMeta {
+  src: string;
+  frameW: number;
+  frameH: number;
+  frames: number;
+  fps?: number;
+  loop?: boolean;
+  anchor?: SpriteAnchor;
+  facing?: 'left' | 'right';
+}
+
+export type EcosystemAnimal = 'wolf' | 'elk' | 'rabbit';
+export type EcosystemAction = 'idle' | 'walk' | 'run' | 'howl' | 'graze' | 'hop' | 'alert';
+
+export interface EarthAtlasMeta {
+  atlas: string;
+  frames: number;
+  columns: number;
+  rows: number;
+  frameW: number;
+  frameH: number;
+  fps?: number;
+}
+
+export type SceneLayerKey =
+  | 'sky'
+  | 'mountains'
+  | 'meadow'
+  | 'forestBack'
+  | 'river'
+  | 'foreground';
+
+export interface SceneLayerMeta {
+  src: string;
+  alpha: boolean;
+}
+
+export interface ScenePropMeta {
+  src: string;
+  width: number;
+  height: number;
+}
+
+export interface EcosystemManifest {
+  version: string;
+  earth?: EarthAtlasMeta;
+  animals: Partial<Record<EcosystemAnimal, Partial<Record<EcosystemAction, SheetMeta>>>>;
+  scene?: {
+    width: number;
+    height: number;
+    layers: Partial<Record<SceneLayerKey, SceneLayerMeta>>;
+    waterMask?: string;
+  };
+  props?: Record<string, ScenePropMeta>;
+}
+
+export const ECOSYSTEM_MANIFEST = assetUrl('assets/ecosystem-v1/manifest.json');
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function positiveNumber(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function manifestAssetUrl(src: string): string {
+  if (/^(?:https?:|data:|blob:)/i.test(src) || src.startsWith('/')) return src;
+  if (src.startsWith('assets/')) return assetUrl(src);
+  return assetUrl(`assets/ecosystem-v1/${src.replace(/^\/+/, '')}`);
+}
+
+function parseSheetMeta(value: unknown): SheetMeta | null {
+  if (!isRecord(value) || typeof value.src !== 'string' || value.src.length === 0) return null;
+  return {
+    src: manifestAssetUrl(value.src),
+    frameW: positiveNumber(value.frameW, 1),
+    frameH: positiveNumber(value.frameH, 1),
+    frames: Math.max(1, Math.floor(positiveNumber(value.frames, 1))),
+    fps: positiveNumber(value.fps, 8),
+    loop: value.loop !== false,
+    anchor:
+      isRecord(value.anchor) && typeof value.anchor.x === 'number' && typeof value.anchor.y === 'number'
+        ? { x: value.anchor.x, y: value.anchor.y }
+        : undefined,
+    facing: value.facing === 'left' ? 'left' : value.facing === 'right' ? 'right' : undefined,
+  };
+}
+
+function parseManifest(raw: unknown): EcosystemManifest | null {
+  if (!isRecord(raw) || typeof raw.version !== 'string') return null;
+
+  const animals: EcosystemManifest['animals'] = {};
+  for (const animal of ['wolf', 'elk', 'rabbit'] as const) {
+    const source = isRecord(raw.animals) && isRecord(raw.animals[animal]) ? raw.animals[animal] : {};
+    const parsed: Partial<Record<EcosystemAction, SheetMeta>> = {};
+    for (const action of ['idle', 'walk', 'run', 'howl', 'graze', 'hop', 'alert'] as const) {
+      const sheet = parseSheetMeta(source[action]);
+      if (sheet) parsed[action] = sheet;
+    }
+    animals[animal] = parsed;
+  }
+
+  let earth: EarthAtlasMeta | undefined;
+  if (isRecord(raw.earth) && typeof raw.earth.atlas === 'string') {
+    earth = {
+      atlas: manifestAssetUrl(raw.earth.atlas),
+      frames: Math.max(1, Math.floor(positiveNumber(raw.earth.frames, 1))),
+      columns: Math.max(1, Math.floor(positiveNumber(raw.earth.columns, 1))),
+      rows: Math.max(1, Math.floor(positiveNumber(raw.earth.rows, 1))),
+      frameW: positiveNumber(raw.earth.frameW, 1),
+      frameH: positiveNumber(raw.earth.frameH, 1),
+      fps: positiveNumber(raw.earth.fps, 8),
+    };
+  }
+
+  let scene: EcosystemManifest['scene'];
+  if (isRecord(raw.scene)) {
+    const layers: Partial<Record<SceneLayerKey, SceneLayerMeta>> = {};
+    for (const key of ['sky', 'mountains', 'meadow', 'forestBack', 'river', 'foreground'] as const) {
+      const layer = isRecord(raw.scene.layers) && isRecord(raw.scene.layers[key]) ? raw.scene.layers[key] : null;
+      if (layer && typeof layer.src === 'string') {
+        layers[key] = { src: manifestAssetUrl(layer.src), alpha: layer.alpha !== false };
+      }
+    }
+    scene = {
+      width: positiveNumber(raw.scene.width, 2048),
+      height: positiveNumber(raw.scene.height, 1152),
+      layers,
+      waterMask: typeof raw.scene.waterMask === 'string' ? manifestAssetUrl(raw.scene.waterMask) : undefined,
+    };
+  }
+
+  const props: EcosystemManifest['props'] = {};
+  if (isRecord(raw.props)) {
+    for (const [id, value] of Object.entries(raw.props)) {
+      if (isRecord(value) && typeof value.src === 'string') {
+        props[id] = {
+          src: manifestAssetUrl(value.src),
+          width: positiveNumber(value.width, 64),
+          height: positiveNumber(value.height, 64),
+        };
+      }
+    }
+  }
+
+  return { version: raw.version, earth, animals, scene, props };
+}
+
+let ecosystemManifestPromise: Promise<EcosystemManifest | null> | null = null;
+
+/** Load and validate the generated pack once. A missing pack is a normal fallback case. */
+export function loadEcosystemManifest(): Promise<EcosystemManifest | null> {
+  if (ecosystemManifestPromise) return ecosystemManifestPromise;
+  ecosystemManifestPromise = fetch(ECOSYSTEM_MANIFEST)
+    .then((response) => {
+      if (!response.ok) throw new Error(`Failed to load ${ECOSYSTEM_MANIFEST}`);
+      return response.json() as Promise<unknown>;
+    })
+    .then(parseManifest)
+    .catch(() => null);
+  return ecosystemManifestPromise;
+}
+
 export function pixelEarthFrame(n: number): string {
   const id = String(n).padStart(4, '0');
   return assetUrl(`assets/earth/${id}.png`);
@@ -17,18 +190,23 @@ export const PIXEL_EARTH_FRAME_COUNT = 20;
 
 /** ScratchIO Animated Wild Animals — horizontal strips */
 export const ANIMAL_SHEETS = {
+  // Aliases keep the old ScratchIO assets usable until the generated pack is available.
+  wolfIdle: { src: assetUrl('assets/animals/Wolf_Walk.png'), frameW: 64, frameH: 40, frames: 8 },
   wolfWalk: { src: assetUrl('assets/animals/Wolf_Walk.png'), frameW: 64, frameH: 40, frames: 8 },
   wolfRun: { src: assetUrl('assets/animals/Wolf_Run.png'), frameW: 64, frameH: 40, frames: 6 },
   wolfHowl: { src: assetUrl('assets/animals/Wolf_Howl.png'), frameW: 64, frameH: 40, frames: 10 },
   rabbitIdle: { src: assetUrl('assets/animals/Rabbit_Idle.png'), frameW: 32, frameH: 26, frames: 10 },
   rabbitHop: { src: assetUrl('assets/animals/Rabbit_Hop.png'), frameW: 32, frameH: 26, frames: 10 },
   rabbitRun: { src: assetUrl('assets/animals/Rabbit_Run.png'), frameW: 32, frameH: 26, frames: 6 },
+  rabbitAlert: { src: assetUrl('assets/animals/Rabbit_Hop.png'), frameW: 32, frameH: 26, frames: 10 },
+  elkIdle: { src: assetUrl('assets/animals/Deer_Idle.png'), frameW: 72, frameH: 52, frames: 10 },
+  elkWalk: { src: assetUrl('assets/animals/Deer_Walk.png'), frameW: 72, frameH: 52, frames: 8 },
+  elkRun: { src: assetUrl('assets/animals/Deer_Run.png'), frameW: 72, frameH: 52, frames: 6 },
+  elkGraze: { src: assetUrl('assets/animals/Deer_Idle.png'), frameW: 72, frameH: 52, frames: 10 },
   deerIdle: { src: assetUrl('assets/animals/Deer_Idle.png'), frameW: 72, frameH: 52, frames: 10 },
   deerWalk: { src: assetUrl('assets/animals/Deer_Walk.png'), frameW: 72, frameH: 52, frames: 8 },
   deerRun: { src: assetUrl('assets/animals/Deer_Run.png'), frameW: 72, frameH: 52, frames: 6 },
 } as const;
-
-export type SheetMeta = (typeof ANIMAL_SHEETS)[keyof typeof ANIMAL_SHEETS];
 
 export function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -61,6 +239,55 @@ export function drawSheetFrame(
     ctx.drawImage(img, fi * meta.frameW, 0, meta.frameW, meta.frameH, x, y, dw, dh);
   }
   ctx.restore();
+}
+
+/** Draw a horizontal sheet using the manifest's normalized anchor. */
+export function drawSheetFrameAnchored(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  meta: SheetMeta,
+  frameIndex: number,
+  x: number,
+  y: number,
+  scale: number,
+  flipX = false,
+) {
+  const anchor = meta.anchor;
+  if (!anchor) {
+    drawSheetFrame(ctx, img, meta, frameIndex, x, y, scale, flipX);
+    return;
+  }
+  const dw = meta.frameW * scale;
+  const dh = meta.frameH * scale;
+  drawSheetFrame(ctx, img, meta, frameIndex, x - dw * anchor.x, y - dh * anchor.y, scale, flipX);
+}
+
+/** Draw a frame from the generated 8×6 earth atlas without rotating its plane. */
+export function drawEarthAtlasFrame(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  meta: EarthAtlasMeta,
+  frameIndex: number,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+) {
+  const total = Math.max(1, Math.min(meta.frames, meta.columns * meta.rows));
+  const fi = ((Math.floor(frameIndex) % total) + total) % total;
+  const col = fi % meta.columns;
+  const row = Math.floor(fi / meta.columns);
+  ctx.drawImage(
+    img,
+    col * meta.frameW,
+    row * meta.frameH,
+    meta.frameW,
+    meta.frameH,
+    x,
+    y,
+    width,
+    height,
+  );
 }
 
 /** Kenney foliage — curated sprites under public/assets/plants/ */

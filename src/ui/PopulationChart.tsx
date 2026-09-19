@@ -8,7 +8,7 @@ const SERIES: { key: keyof Omit<HistoryPoint, 'tick'>; color: string; label: str
   { key: 'grass', color: '#66bb6a', label: '草', scale: 0.08 },
   { key: 'shrubs', color: '#9ccc65', label: '灌木', scale: 0.12 },
   { key: 'rabbits', color: '#ffb74d', label: '兔子', scale: 1 },
-  { key: 'elk', color: '#8d6e63', label: '麋鹿', scale: 2 },
+  { key: 'elk', color: '#8d6e63', label: '美洲赤鹿', scale: 2 },
   { key: 'wolves', color: '#78909c', label: '狼', scale: 8 },
 ];
 
