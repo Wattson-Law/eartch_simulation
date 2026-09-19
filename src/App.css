@@ -522,20 +522,13 @@ button:focus-visible, input:focus-visible {
 }
 .observation-dot { width: 6px; height: 6px; border-radius: 50%; background: #81966a; }
 .observation-text { font-size: 0.75rem; color: #5e573e; }
-.observation-animals { display: flex; align-items: end; gap: 6px; flex-shrink: 0; }
-.observation-sprite {
-  display: block;
-  background-repeat: no-repeat;
-  animation: observation-frames 1s steps(8, end) infinite;
-}
-.is-paused .observation-sprite { animation-play-state: paused; }
-@keyframes observation-frames {
-  to { background-position-x: var(--sheet-end); }
-}
+.observation-rhythm { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.observation-rhythm span { width: 5px; height: 5px; border-radius: 50%; background: #d6d9c7; }
+.observation-rhythm .is-current { background: #9b713f; transform: scale(1.35); }
+.phase-chase { background: #fbf2e4; border-color: #e6d6bb; }
+.phase-chase .observation-dot { background: #bc824d; }
+.phase-escaped .observation-dot { background: #709a82; }
 .scene-caption { margin: -3px 2px 2px; color: #71806a; font-size: 0.68rem; }
-@media (prefers-reduced-motion: reduce) {
-  .observation-sprite { animation: none; }
-}
 
 
 .globe-actions {

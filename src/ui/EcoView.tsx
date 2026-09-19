@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import type { EcosystemState } from '../sim/types';
+import type { WildlifeObservation } from '../sim/wildlife';
 import { SpeciesPanel } from './SpeciesPanel';
 import { PopulationChart } from './PopulationChart';
 import { EventLog } from './EventLog';
@@ -14,6 +16,7 @@ interface Props {
 }
 
 export function EcoView({ state, onBack, onOpenCascade, hasCascade, onTogglePause }: Props) {
+  const [observation, setObservation] = useState<WildlifeObservation>({ phase: 'quiet', text: '野兔穿行草丛，鹿群在河谷觅食。' });
   return (
     <div className="eco-view">
       <div className="eco-toolbar">
@@ -33,9 +36,9 @@ export function EcoView({ state, onBack, onOpenCascade, hasCascade, onTogglePaus
           </button>
         )}
       </div>
-      <EcoSceneCanvas state={state} />
-      <PredationAnimation event={state.lastPredation} paused={state.paused} />
-      <p className="scene-caption">画面展示代表个体，完整种群数量见下方。</p>
+      <EcoSceneCanvas state={state} onObservation={setObservation} />
+      <PredationAnimation observation={observation} paused={state.paused} />
+      <p className="scene-caption">观察它们觅食、追逐与休息 · 点选动物查看当前行为。画面展示代表个体。</p>
       <SpeciesPanel state={state} />
       <div className="eco-bottom">
         <PopulationChart history={state.history} />
