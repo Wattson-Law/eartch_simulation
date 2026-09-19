@@ -1,275 +1,313 @@
-import { useEffect, useRef } from 'react';
-import {
-  drawEarthAtlasFrame,
-  loadEcosystemManifest,
-  PLANET_EARTH,
-  PIXEL_EARTH_FRAME_COUNT,
-  loadImage,
-  pixelEarthFrame,
-  type EarthAtlasMeta,
-} from '../assetsPaths';
+import { useEffect, useRef, useState } from 'react';
+import { assetUrl, loadEcosystemManifest, loadImage } from '../assetsPaths';
+import { createGlobeLookup, projectLocation, renderGlobeTexture, TAU, wrapAngle, YELLOWSTONE } from './globeProjection';
 
-interface Props {
-  onEnterYellowstone: () => void;
+interface Props { onEnterYellowstone: () => void }
+interface GlobeControls { toggle: () => void; locate: () => void }
+
+const TEXTURE_WIDTH = 1024;
+const TEXTURE_HEIGHT = 512;
+const AUTO_SPEED = 0.09;
+
+/** A painted fallback stays rotatable when the optional artwork is unavailable. */
+function fallbackMap(ctx: CanvasRenderingContext2D) {
+  ctx.fillStyle = '#69b9c5';
+  ctx.fillRect(0, 0, TEXTURE_WIDTH, TEXTURE_HEIGHT);
+  const continents = [
+    [[-168,66],[-143,70],[-125,58],[-106,72],[-61,54],[-82,23],[-99,16],[-122,33],[-133,55]],
+    [[-80,10],[-61,10],[-36,-7],[-51,-24],[-69,-55],[-77,-22]],
+    [[-53,83],[-20,77],[-43,59],[-61,66]],
+    [[-11,36],[-9,57],[25,71],[54,58],[101,76],[178,61],[145,42],[119,19],[105,-7],[77,8],[48,30]],
+    [[-17,34],[12,37],[36,29],[50,10],[31,-34],[16,-35],[-4,4],[-17,14]],
+    [[112,-22],[132,-11],[153,-24],[146,-39],[116,-34]],
+    [[-180,-72],[-100,-76],[0,-71],[90,-77],[180,-73],[180,-90],[-180,-90]],
+  ];
+  continents.forEach((points, index) => {
+    ctx.beginPath();
+    points.forEach(([longitude, latitude], i) => {
+      const x = (longitude + 180) / 360 * TEXTURE_WIDTH;
+      const y = (90 - latitude) / 180 * TEXTURE_HEIGHT;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.closePath();
+    ctx.fillStyle = index === 2 || index === 6 ? '#f6efd8' : '#afc47e';
+    ctx.strokeStyle = '#385960';
+    ctx.lineWidth = 2;
+    ctx.fill(); ctx.stroke();
+  });
 }
 
-/** Canvas 2D 扁平小地球：Kenney 贴图自转 + 黄石热点可点 */
+/** Continuous orthographic projection on Canvas 2D; no 3D scene or frame atlas. */
 export function GlobeCanvas({ onEnterYellowstone }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const angleRef = useRef(0);
-  const hoverHotRef = useRef(false);
-  const frameRef = useRef(0);
+  const controlsRef = useRef<GlobeControls | null>(null);
+  const [autoRotate, setAutoRotate] = useState(() => !window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    let raf = 0;
-    let cancelled = false;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-    let animationSeconds = 0;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let reducedMotion = media.matches;
+    let spinning = !reducedMotion;
+    let longitude = YELLOWSTONE.longitude + 0.2;
+    let velocity = 0;
+    let target: number | null = null;
+    let time = 0;
     let previousNow = performance.now();
-
-    const kenney = { img: null as HTMLImageElement | null };
-    const pixelFrames: HTMLImageElement[] = [];
-    const atlas = { img: null as HTMLImageElement | null, meta: null as EarthAtlasMeta | null };
-
-    void (async () => {
-      const manifest = await loadEcosystemManifest();
-      if (manifest?.earth) {
-        try {
-          atlas.img = await loadImage(manifest.earth.atlas);
-          atlas.meta = manifest.earth;
-        } catch {
-          /* keep legacy fallbacks */
-        }
-      }
-      try {
-        kenney.img = await loadImage(PLANET_EARTH);
-      } catch {
-        /* fallback below */
-      }
-      const loads = Array.from({ length: PIXEL_EARTH_FRAME_COUNT }, (_, i) =>
-        loadImage(pixelEarthFrame(i + 1)).catch(() => null),
-      );
-      const imgs = await Promise.all(loads);
-      for (const im of imgs) {
-        if (im) pixelFrames.push(im);
-      }
-    })();
+    let raf = 0;
+    let disposed = false;
+    let width = 0, height = 0, cx = 0, cy = 0, radius = 0;
+    let hoverHot = false;
+    let textureSource = 'painted-fallback';
+    let lastRenderedLongitude = NaN;
+    let drag: { id: number; startX: number; startY: number; lastX: number; lastAt: number; moved: boolean; startedOnHotspot: boolean } | null = null;
+    const scenery: { sky?: HTMLImageElement; cloud?: HTMLImageElement } = {};
+    const mapCanvas = document.createElement('canvas');
+    mapCanvas.width = TEXTURE_WIDTH; mapCanvas.height = TEXTURE_HEIGHT;
+    const mapCtx = mapCanvas.getContext('2d', { willReadFrequently: true })!;
+    fallbackMap(mapCtx);
+    let texture = mapCtx.getImageData(0, 0, TEXTURE_WIDTH, TEXTURE_HEIGHT).data;
+    const sphere = document.createElement('canvas');
+    const sphereCtx = sphere.getContext('2d')!;
+    let lookup = createGlobeLookup(320, TEXTURE_WIDTH, TEXTURE_HEIGHT);
+    let pixels = new ImageData(lookup.size, lookup.size);
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
-      canvas.width = rect.width * dpr;
-      canvas.height = rect.height * dpr;
+      width = rect.width; height = rect.height;
+      if (!width || !height) return;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.round(width * dpr); canvas.height = Math.round(height * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      cx = width / 2; cy = height * 0.475;
+      radius = Math.min(width * 0.36, height * 0.395);
+      const size = Math.min(560, Math.max(240, Math.round(radius * 2 * dpr / 8) * 8));
+      if (sphere.width !== size) {
+        sphere.width = sphere.height = size;
+        lookup = createGlobeLookup(size, TEXTURE_WIDTH, TEXTURE_HEIGHT);
+        pixels = new ImageData(size, size);
+      }
+      lastRenderedLongitude = NaN;
     };
+    const observer = new ResizeObserver(resize);
+    observer.observe(canvas);
     resize();
-    window.addEventListener('resize', resize);
 
-    const drawProceduralFallback = (cx: number, cy: number, r: number) => {
-      const ocean = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.2, cx, cy, r);
-      ocean.addColorStop(0, '#5ec8e8');
-      ocean.addColorStop(1, '#2a6f9e');
-      ctx.beginPath();
-      ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx.fillStyle = ocean;
-      ctx.fill();
-
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx.clip();
-      const a = angleRef.current;
-      const lands = [
-        { dx: -0.35, dy: -0.1, rw: 0.45, rh: 0.35, color: '#7cbc4a' },
-        { dx: 0.25, dy: 0.05, rw: 0.38, rh: 0.42, color: '#8fbf5a' },
-        { dx: -0.05, dy: 0.35, rw: 0.5, rh: 0.28, color: '#6aa84f' },
-        { dx: 0.4, dy: -0.35, rw: 0.25, rh: 0.2, color: '#9ccc65' },
-      ];
-      for (const land of lands) {
-        const lx = cx + Math.cos(a) * land.dx * r * 2 + Math.sin(a) * land.dy * r * 0.3;
-        const ly = cy + land.dy * r * 1.2;
-        ctx.beginPath();
-        ctx.ellipse(lx, ly, land.rw * r, land.rh * r, a * 0.3, 0, Math.PI * 2);
-        ctx.fillStyle = land.color;
-        ctx.fill();
-      }
-      ctx.restore();
+    const installTexture = (image: HTMLImageElement) => {
+      if (disposed) return;
+      mapCtx.clearRect(0, 0, TEXTURE_WIDTH, TEXTURE_HEIGHT);
+      mapCtx.drawImage(image, 0, 0, TEXTURE_WIDTH, TEXTURE_HEIGHT);
+      texture = mapCtx.getImageData(0, 0, TEXTURE_WIDTH, TEXTURE_HEIGHT).data;
+      textureSource = 'storybook-map';
+      lastRenderedLongitude = NaN;
     };
+    void loadImage(assetUrl('assets/ecosystem-v1/earth/map.png')).then(installTexture).catch(() => { /* keep painted fallback */ });
+    void loadEcosystemManifest().then(manifest => {
+      if (disposed) return;
+      const sky = manifest?.scene?.layers.sky?.src;
+      const cloud = manifest?.props?.cloud?.src;
+      if (sky) void loadImage(sky).then(image => { if (!disposed) scenery.sky = image; }).catch(() => {});
+      if (cloud) void loadImage(cloud).then(image => { if (!disposed) scenery.cloud = image; }).catch(() => {});
+    });
 
-    const drawEarth = (cx: number, cy: number, r: number) => {
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx.clip();
+    const hotspot = () => {
+      const point = projectLocation(YELLOWSTONE.longitude, YELLOWSTONE.latitude, longitude);
+      return { x: cx + point.x * radius, y: cy + point.y * radius, visible: point.z > 0.07, depth: point.z };
+    };
+    const localPoint = (event: PointerEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    };
+    const overHotspot = (x: number, y: number) => {
+      const hot = hotspot();
+      return hot.visible && Math.hypot(x - hot.x, y - hot.y) < 22;
+    };
+    const toggle = () => {
+      spinning = !spinning; velocity = 0; target = null;
+      setAutoRotate(spinning);
+    };
+    const locate = () => {
+      spinning = false; velocity = 0; setAutoRotate(false);
+      if (reducedMotion) { longitude = YELLOWSTONE.longitude; target = null; }
+      else target = YELLOWSTONE.longitude;
+    };
+    controlsRef.current = { toggle, locate };
 
-      if (atlas.img?.complete && atlas.meta) {
-        ctx.imageSmoothingEnabled = true;
-        drawEarthAtlasFrame(ctx, atlas.img, atlas.meta, animationSeconds * (atlas.meta.fps ?? 8), cx - r, cy - r, r * 2, r * 2);
-      } else if (kenney.img?.complete && kenney.img.naturalWidth > 0) {
-        ctx.translate(cx, cy);
-        const size = r * 2.15;
-        ctx.imageSmoothingEnabled = true;
-        ctx.drawImage(kenney.img, -size / 2, -size / 2, size, size);
-      } else if (pixelFrames.length > 0) {
-        const fi = Math.floor(frameRef.current) % pixelFrames.length;
-        ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(pixelFrames[fi], cx - r, cy - r, r * 2, r * 2);
+    const drawCloud = (x: number, y: number, size: number, opacity: number) => {
+      ctx.save(); ctx.globalAlpha = opacity;
+      if (scenery.cloud) {
+        const image = scenery.cloud;
+        const h = size * image.naturalHeight / image.naturalWidth;
+        ctx.drawImage(image, x - size / 2, y - h / 2, size, h);
       } else {
-        ctx.restore();
-        drawProceduralFallback(cx, cy, r);
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, Math.PI * 2);
-        ctx.clip();
-      }
-
-      const hotAngle = angleRef.current + 0.6;
-      const visible = Math.cos(hotAngle) > -0.15;
-      if (visible) {
-        // 热点坐标基于未旋转的屏幕空间：取消旋转变换后画
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, Math.PI * 2);
-        ctx.clip();
-        const hx = cx + Math.sin(hotAngle) * r * 0.55;
-        const hy = cy - r * 0.18;
-        const pulse = 1 + Math.sin(performance.now() / 400) * 0.08;
-        ctx.beginPath();
-        ctx.arc(hx, hy, 10 * pulse * (hoverHotRef.current ? 1.25 : 1), 0, Math.PI * 2);
-        ctx.fillStyle = hoverHotRef.current ? '#ff7043' : '#ff8a65';
-        ctx.fill();
-        ctx.strokeStyle = '#fff3e0';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        ctx.font = '12px system-ui, sans-serif';
-        ctx.fillStyle = '#fff8e1';
-        ctx.textAlign = 'center';
-        ctx.fillText('Yellowstone', hx, hy - 16);
-        ctx.fillText('点击进入', hx, hy + 26);
+        ctx.fillStyle = '#fff8e5'; ctx.strokeStyle = '#6a8580'; ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.ellipse(x, y, size * 0.48, size * 0.14, 0, 0, TAU); ctx.fill(); ctx.stroke();
+        ctx.beginPath(); ctx.ellipse(x - size * 0.08, y - size * 0.06, size * 0.25, size * 0.15, 0, 0, TAU); ctx.fill();
       }
       ctx.restore();
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     };
 
     const draw = (now: number) => {
-      if (cancelled) return;
-      const delta = Math.min(0.1, Math.max(0, (now - previousNow) / 1000));
+      if (disposed) return;
+      const delta = document.hidden ? 0 : Math.min(0.05, Math.max(0, (now - previousNow) / 1000));
       previousNow = now;
-      if (!reducedMotion) animationSeconds += delta;
-      const rect = canvas.getBoundingClientRect();
-      const w = rect.width;
-      const h = rect.height;
-      const cx = w / 2;
-      const cy = h / 2 - 10;
-      const r = Math.min(w, h) * 0.32;
-
-      ctx.clearRect(0, 0, w, h);
-
-      ctx.fillStyle = '#0b1220';
-      ctx.fillRect(0, 0, w, h);
-      for (let i = 0; i < 40; i++) {
-        const sx = (Math.sin(i * 12.3 + angleRef.current * 0.2) * 0.5 + 0.5) * w;
-        const sy = (Math.cos(i * 7.1) * 0.5 + 0.5) * h;
-        ctx.fillStyle = `rgba(255,255,255,${0.2 + (i % 5) * 0.1})`;
-        ctx.beginPath();
-        ctx.arc(sx, sy, 1.2, 0, Math.PI * 2);
-        ctx.fill();
+      if (!drag) {
+        if (target !== null) {
+          const difference = wrapAngle(target - longitude);
+          longitude = wrapAngle(longitude + difference * (1 - Math.exp(-delta * 6)));
+          if (Math.abs(difference) < 0.0001) { longitude = target; target = null; }
+        } else {
+          const decay = Math.exp(-4 * delta);
+          longitude = wrapAngle(longitude + velocity * (1 - decay) / 4 + (spinning ? AUTO_SPEED * delta : 0));
+          velocity *= decay;
+          if (Math.abs(velocity) < 0.0001) velocity = 0;
+        }
       }
+      if (spinning && !drag) time += delta;
+      if (width && height) {
+        ctx.clearRect(0, 0, width, height);
+        // Only the upper sky is standalone artwork; its lower edge belongs behind mountains.
+        if (scenery.sky) ctx.drawImage(scenery.sky, 0, 0, scenery.sky.naturalWidth, scenery.sky.naturalHeight * .3, 0, 0, width, height);
+        else {
+          const wash = ctx.createLinearGradient(0, 0, 0, height);
+          wash.addColorStop(0, '#bce3df'); wash.addColorStop(1, '#f5f0d9');
+          ctx.fillStyle = wash; ctx.fillRect(0, 0, width, height);
+        }
+        const paperWash = ctx.createLinearGradient(0, 0, 0, height);
+        paperWash.addColorStop(0, 'rgba(250,247,228,0.26)');
+        paperWash.addColorStop(1, 'rgba(245,243,216,0.84)');
+        ctx.fillStyle = paperWash; ctx.fillRect(0, 0, width, height);
+        const sunX = width * 0.82, sunY = height * 0.17, sunRadius = Math.min(25, width * 0.055);
+        const halo = ctx.createRadialGradient(sunX, sunY, sunRadius * 0.4, sunX, sunY, sunRadius * 2.4);
+        halo.addColorStop(0, 'rgba(255,221,135,.4)'); halo.addColorStop(1, 'rgba(255,221,135,0)');
+        ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(sunX, sunY, sunRadius * 2.4, 0, TAU); ctx.fill();
+        ctx.fillStyle = '#f7d98e'; ctx.strokeStyle = '#c49d61'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(sunX, sunY, sunRadius, 0, TAU); ctx.fill(); ctx.stroke();
+        drawCloud(width * 0.17 + Math.sin(time * .045) * width * .06, height * .24, Math.min(170, width * .24), .86);
+        drawCloud(width * .83 - Math.sin(time * .036) * width * .06, height * .7, Math.min(200, width * .26), .8);
 
-      ctx.beginPath();
-      ctx.arc(cx + 6, cy + 10, r * 1.05, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(0,0,0,0.25)';
-      ctx.fill();
-
-      drawEarth(cx, cy, r);
-
-      ctx.beginPath();
-      ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-      ctx.lineWidth = 3;
-      ctx.stroke();
-
-      ctx.fillStyle = '#e8f4ff';
-      ctx.font = 'bold 22px "Segoe UI", system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('小地球', cx, 36);
-      ctx.font = '13px system-ui, sans-serif';
-      ctx.fillStyle = '#a8c0d8';
-      ctx.fillText('我做了一个存活在电脑里的地球', cx, 56);
-
-      if (!reducedMotion) {
-        angleRef.current += delta * 0.48;
-        frameRef.current += delta * 7.2;
+        ctx.fillStyle = 'rgba(57,94,80,0.08)';
+        ctx.beginPath(); ctx.ellipse(cx, cy + radius * 1.1, radius * .66, radius * .065, 0, 0, TAU); ctx.fill();
+        ctx.strokeStyle = 'rgba(250,250,233,0.64)'; ctx.lineWidth = 9;
+        ctx.beginPath(); ctx.arc(cx, cy, radius + 6, 0, TAU); ctx.stroke();
+        if (!Number.isFinite(lastRenderedLongitude) || Math.abs(longitude - lastRenderedLongitude) > 0.000001) {
+          renderGlobeTexture(pixels.data, texture, lookup, longitude);
+          sphereCtx.putImageData(pixels, 0, 0);
+          lastRenderedLongitude = longitude;
+        }
+        ctx.drawImage(sphere, cx - radius, cy - radius, radius * 2, radius * 2);
+        ctx.strokeStyle = '#314e59'; ctx.lineWidth = 1.8;
+        ctx.beginPath(); ctx.arc(cx, cy, radius - .5, 0, TAU); ctx.stroke();
+        const hot = hotspot();
+        if (hot.visible) {
+          ctx.save();
+          ctx.globalAlpha = Math.min(1, (hot.depth - .07) / .14);
+          ctx.fillStyle = 'rgba(255,242,206,0.48)';
+          ctx.beginPath(); ctx.arc(hot.x, hot.y, 13 + Math.sin(time * 2) * 1.5, 0, TAU); ctx.fill();
+          ctx.fillStyle = hoverHot ? '#c97742' : '#de9452'; ctx.strokeStyle = '#fff9e7'; ctx.lineWidth = 2.5;
+          ctx.beginPath(); ctx.arc(hot.x, hot.y, hoverHot ? 7.5 : 6, 0, TAU); ctx.fill(); ctx.stroke();
+          ctx.font = '600 12px "Microsoft YaHei", system-ui, sans-serif'; ctx.textAlign = 'center';
+          const labelX = Math.max(48, Math.min(width - 48, hot.x));
+          ctx.fillStyle = '#fff8e5'; ctx.strokeStyle = '#9caa88'; ctx.lineWidth = .8;
+          ctx.beginPath(); ctx.roundRect(labelX - 41, hot.y - 37, 82, 24, 12); ctx.fill(); ctx.stroke();
+          ctx.fillStyle = '#425441'; ctx.fillText('黄石国家公园', labelX, hot.y - 21);
+          ctx.restore();
+        }
+        const degrees = Math.round(longitude * 180 / Math.PI);
+        canvas.setAttribute('aria-valuenow', String(degrees));
+        canvas.setAttribute('aria-valuetext', `朝向${Math.abs(degrees)}度${degrees < 0 ? '西经' : '东经'}`);
+        if (import.meta.env.DEV) canvas.dataset.globe = JSON.stringify({ longitude, velocity, time, spinning, dragging: !!drag, targeting: target !== null, source: textureSource, hotspot: hot, radius, cx, cy, renderSize: lookup.size });
       }
       raf = requestAnimationFrame(draw);
     };
 
-    raf = requestAnimationFrame(draw);
-
-    const hitTest = (clientX: number, clientY: number) => {
-      const rect = canvas.getBoundingClientRect();
-      const x = clientX - rect.left;
-      const y = clientY - rect.top;
-      const w = rect.width;
-      const h = rect.height;
-      const cx = w / 2;
-      const cy = h / 2 - 10;
-      const r = Math.min(w, h) * 0.32;
-      const hotAngle = angleRef.current + 0.6;
-      const visible = Math.cos(hotAngle) > -0.15;
-      if (!visible) return false;
-      const hx = cx + Math.sin(hotAngle) * r * 0.55;
-      const hy = cy - r * 0.18;
-      const dx = x - hx;
-      const dy = y - hy;
-      return dx * dx + dy * dy < 22 * 22;
+    const onDown = (event: PointerEvent) => {
+      if (!event.isPrimary || event.button !== 0 || drag) return;
+      const point = localPoint(event);
+      if (Math.hypot(point.x - cx, point.y - cy) > radius + 10) return;
+      canvas.focus({ preventScroll: true });
+      target = null; velocity = 0;
+      drag = { id: event.pointerId, startX: point.x, startY: point.y, lastX: point.x, lastAt: event.timeStamp, moved: false, startedOnHotspot: overHotspot(point.x, point.y) };
+      canvas.setPointerCapture(event.pointerId); canvas.style.cursor = 'grabbing';
     };
-
-    const onMove = (e: MouseEvent) => {
-      hoverHotRef.current = hitTest(e.clientX, e.clientY);
-      canvas.style.cursor = hoverHotRef.current ? 'pointer' : 'default';
-    };
-    const onClick = (e: MouseEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      const w = rect.width;
-      const h = rect.height;
-      const cx = w / 2;
-      const cy = h / 2 - 10;
-      const r = Math.min(w, h) * 0.32;
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      const dx = x - cx;
-      const dy = y - cy;
-      if (dx * dx + dy * dy <= r * r || hitTest(e.clientX, e.clientY)) {
-        onEnterYellowstone();
+    const onMove = (event: PointerEvent) => {
+      const point = localPoint(event);
+      if (drag?.id === event.pointerId) {
+        if (Math.hypot(point.x - drag.startX, point.y - drag.startY) > 6) drag.moved = true;
+        if (drag.moved) {
+          const change = -(point.x - drag.lastX) / radius;
+          longitude = wrapAngle(longitude + change);
+          const seconds = Math.max(.008, (event.timeStamp - drag.lastAt) / 1000);
+          velocity = reducedMotion ? 0 : Math.max(-3, Math.min(3, velocity * .4 + change / seconds * .6));
+        }
+        drag.lastX = point.x; drag.lastAt = event.timeStamp;
+      } else {
+        hoverHot = overHotspot(point.x, point.y);
+        canvas.style.cursor = hoverHot ? 'pointer' : Math.hypot(point.x - cx, point.y - cy) <= radius ? 'grab' : 'default';
       }
     };
-
-    canvas.addEventListener('mousemove', onMove);
-    canvas.addEventListener('click', onClick);
-
+    const onUp = (event: PointerEvent) => {
+      if (drag?.id !== event.pointerId) return;
+      const point = localPoint(event);
+      const enter = !drag.moved && drag.startedOnHotspot && overHotspot(point.x, point.y);
+      if (event.timeStamp - drag.lastAt > 120 || !drag.moved) velocity = 0;
+      drag = null;
+      if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+      canvas.style.cursor = 'grab';
+      if (enter) onEnterYellowstone();
+    };
+    const onCancel = (event: PointerEvent) => {
+      if (drag?.id !== event.pointerId) return;
+      drag = null; velocity = 0; hoverHot = false; canvas.style.cursor = 'grab';
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        event.preventDefault(); target = null; velocity = 0;
+        longitude = wrapAngle(longitude + (event.key === 'ArrowRight' ? .15 : -.15));
+      } else if (event.key === 'Home') { event.preventDefault(); locate(); }
+      else if (event.key === ' ') { event.preventDefault(); toggle(); }
+      else if (event.key === 'Enter') { event.preventDefault(); onEnterYellowstone(); }
+    };
+    const onMotionPreference = () => {
+      reducedMotion = media.matches;
+      if (reducedMotion) { spinning = false; velocity = 0; target = null; setAutoRotate(false); }
+    };
+    canvas.addEventListener('pointerdown', onDown);
+    canvas.addEventListener('pointermove', onMove);
+    canvas.addEventListener('pointerup', onUp);
+    canvas.addEventListener('pointercancel', onCancel);
+    canvas.addEventListener('lostpointercapture', onCancel);
+    canvas.addEventListener('keydown', onKey);
+    media.addEventListener('change', onMotionPreference);
+    raf = requestAnimationFrame(draw);
     return () => {
-      cancelled = true;
-      cancelAnimationFrame(raf);
-      window.removeEventListener('resize', resize);
-      canvas.removeEventListener('mousemove', onMove);
-      canvas.removeEventListener('click', onClick);
+      disposed = true; cancelAnimationFrame(raf); observer.disconnect(); controlsRef.current = null;
+      canvas.removeEventListener('pointerdown', onDown);
+      canvas.removeEventListener('pointermove', onMove);
+      canvas.removeEventListener('pointerup', onUp);
+      canvas.removeEventListener('pointercancel', onCancel);
+      canvas.removeEventListener('lostpointercapture', onCancel);
+      canvas.removeEventListener('keydown', onKey);
+      media.removeEventListener('change', onMotionPreference);
     };
   }, [onEnterYellowstone]);
 
   return (
     <div className="globe-wrap">
-      <canvas ref={canvasRef} className="globe-canvas" />
+      <div className="globe-heading">
+        <span className="globe-eyebrow">OUR LIVING EARTH</span>
+        <h2>从小地球，走进黄石</h2>
+        <p>转动世界，寻找森林、河流与它们的居民。</p>
+      </div>
+      <canvas ref={canvasRef} className="globe-canvas" role="slider" tabIndex={0} aria-label="旋转地球" aria-valuemin={-180} aria-valuemax={180} aria-valuenow={-99} aria-describedby="globe-help" />
       <div className="globe-actions">
-        <p className="globe-hint">点击地球或橙色热点进入黄石生态区</p>
-        <button type="button" className="enter-btn" onClick={onEnterYellowstone}>
-          进入黄石生态区
-        </button>
+        <p className="globe-hint" id="globe-help">左右拖动旋转 · 点击黄石标记进入<span className="globe-keyboard-hint">方向键旋转，空格暂停，Home 定位，Enter 进入</span></p>
+        <div className="globe-controls">
+          <button type="button" className="globe-control" aria-pressed={!autoRotate} onClick={() => controlsRef.current?.toggle()}>{autoRotate ? '暂停自转' : '继续自转'}</button>
+          <button type="button" className="globe-control" onClick={() => controlsRef.current?.locate()}>定位黄石</button>
+          <button type="button" className="enter-btn" onClick={onEnterYellowstone}>进入黄石生态区 <span aria-hidden="true">↗</span></button>
+        </div>
       </div>
     </div>
   );
