@@ -151,7 +151,7 @@ function EarthPreview({ meta }: { meta: NonNullable<EcosystemManifest['earth']> 
         <button type="button" onClick={() => step(1)} aria-label="下一帧">›</button>
         <label>
           FPS
-          <input type="number" min={1} max={30} value={fps} onChange={(event) => setFps(Math.max(1, Math.min(30, Number(event.target.value) || 1)))} />
+          <input type="number" min={1} max={120} value={fps} onChange={(event) => setFps(Math.max(1, Math.min(120, Number(event.target.value) || 1)))} />
         </label>
         <span className="asset-frame-readout">帧 {frame + 1}/{meta.frames}</span>
       </div>
@@ -225,7 +225,7 @@ function SheetPreview({ meta, label }: { meta: SheetMeta; label: string }) {
         <button type="button" onClick={() => step(1)} aria-label={`${label}下一帧`}>›</button>
         <label>
           FPS
-          <input type="number" min={1} max={30} value={fps} onChange={(event) => setFps(Math.max(1, Math.min(30, Number(event.target.value) || 1)))} />
+          <input type="number" min={1} max={120} value={fps} onChange={(event) => setFps(Math.max(1, Math.min(120, Number(event.target.value) || 1)))} />
         </label>
         <span className="asset-frame-readout">{frame + 1}/{meta.frames}</span>
       </div>

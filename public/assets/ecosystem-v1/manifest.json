@@ -33,46 +33,64 @@
         "method": "Approved static character; local 0.6% breathing transform, not AI regenerated poses"
       },
       "walk": {
-        "src": "animals/wolf-walk.png",
+        "src": "animals-smooth/wolf-walk.png",
         "frameW": 384,
         "frameH": 256,
-        "frames": 8,
-        "fps": 10,
+        "frames": 32,
+        "fps": 40,
         "loop": true,
         "facing": "right",
         "anchor": {
           "x": 0.5,
           "y": 0.91015625
         },
-        "method": "AI generated eight key poses; local alpha cleanup, fixed-scale extraction and ground-anchor normalization"
+        "method": "Source-prioritized optical-flow interpolation from 8 original key poses; every fourth frame preserves the original pose exactly",
+        "source": {
+          "src": "animals/wolf-walk.png",
+          "frames": 8,
+          "fps": 10,
+          "method": "original generated key-pose sheet"
+        }
       },
       "run": {
-        "src": "animals/wolf-run.png",
+        "src": "animals-smooth/wolf-run.png",
         "frameW": 384,
         "frameH": 256,
-        "frames": 8,
-        "fps": 14,
+        "frames": 32,
+        "fps": 56,
         "loop": true,
         "facing": "right",
         "anchor": {
           "x": 0.5,
           "y": 0.91015625
         },
-        "method": "AI generated eight key poses; local alpha cleanup, fixed-scale extraction and ground-anchor normalization"
+        "method": "Source-prioritized optical-flow interpolation from 8 original key poses; every fourth frame preserves the original pose exactly",
+        "source": {
+          "src": "animals/wolf-run.png",
+          "frames": 8,
+          "fps": 14,
+          "method": "original generated key-pose sheet"
+        }
       },
       "howl": {
-        "src": "animals/wolf-howl.png",
+        "src": "animals-smooth/wolf-howl.png",
         "frameW": 384,
         "frameH": 256,
-        "frames": 8,
-        "fps": 6,
+        "frames": 32,
+        "fps": 24,
         "loop": true,
         "facing": "right",
         "anchor": {
           "x": 0.5,
           "y": 0.91015625
         },
-        "method": "AI generated eight key poses; local alpha cleanup, fixed-scale extraction and ground-anchor normalization"
+        "method": "Source-prioritized optical-flow interpolation from 8 original key poses; every fourth frame preserves the original pose exactly",
+        "source": {
+          "src": "animals/wolf-howl.png",
+          "frames": 8,
+          "fps": 6,
+          "method": "original generated key-pose sheet"
+        }
       }
     },
     "elk": {
@@ -91,46 +109,64 @@
         "method": "Approved static character; local 0.6% breathing transform, not AI regenerated poses"
       },
       "walk": {
-        "src": "animals/elk-walk.png",
+        "src": "animals-smooth/elk-walk.png",
         "frameW": 384,
         "frameH": 256,
-        "frames": 8,
-        "fps": 10,
+        "frames": 32,
+        "fps": 40,
         "loop": true,
         "facing": "right",
         "anchor": {
           "x": 0.5,
           "y": 0.91015625
         },
-        "method": "AI generated eight key poses; local alpha cleanup, fixed-scale extraction and ground-anchor normalization"
+        "method": "Source-prioritized optical-flow interpolation from 8 original key poses; every fourth frame preserves the original pose exactly",
+        "source": {
+          "src": "animals/elk-walk.png",
+          "frames": 8,
+          "fps": 10,
+          "method": "original generated key-pose sheet"
+        }
       },
       "run": {
-        "src": "animals/elk-run.png",
+        "src": "animals-smooth/elk-run.png",
         "frameW": 384,
         "frameH": 256,
-        "frames": 8,
-        "fps": 14,
+        "frames": 32,
+        "fps": 56,
         "loop": true,
         "facing": "right",
         "anchor": {
           "x": 0.5,
           "y": 0.91015625
         },
-        "method": "AI generated eight key poses; local alpha cleanup, fixed-scale extraction and ground-anchor normalization"
+        "method": "Source-prioritized optical-flow interpolation from 8 original key poses; every fourth frame preserves the original pose exactly",
+        "source": {
+          "src": "animals/elk-run.png",
+          "frames": 8,
+          "fps": 14,
+          "method": "original generated key-pose sheet"
+        }
       },
       "graze": {
-        "src": "animals/elk-graze.png",
+        "src": "animals-smooth/elk-graze.png",
         "frameW": 384,
         "frameH": 256,
-        "frames": 8,
-        "fps": 6,
+        "frames": 32,
+        "fps": 24,
         "loop": true,
         "facing": "right",
         "anchor": {
           "x": 0.5,
           "y": 0.91015625
         },
-        "method": "AI generated eight key poses; local alpha cleanup, fixed-scale extraction and ground-anchor normalization"
+        "method": "Source-prioritized optical-flow interpolation from 8 original key poses; every fourth frame preserves the original pose exactly",
+        "source": {
+          "src": "animals/elk-graze.png",
+          "frames": 8,
+          "fps": 6,
+          "method": "original generated key-pose sheet"
+        }
       }
     },
     "rabbit": {
@@ -149,46 +185,64 @@
         "method": "Approved static character; local 0.6% breathing transform, not AI regenerated poses"
       },
       "hop": {
-        "src": "animals/rabbit-hop.png",
+        "src": "animals-smooth/rabbit-hop.png",
         "frameW": 384,
         "frameH": 256,
-        "frames": 8,
-        "fps": 10,
+        "frames": 32,
+        "fps": 40,
         "loop": true,
         "facing": "right",
         "anchor": {
           "x": 0.5,
           "y": 0.91015625
         },
-        "method": "AI generated eight key poses; local alpha cleanup, fixed-scale extraction and ground-anchor normalization"
+        "method": "Source-prioritized optical-flow interpolation from 8 original key poses; every fourth frame preserves the original pose exactly",
+        "source": {
+          "src": "animals/rabbit-hop.png",
+          "frames": 8,
+          "fps": 10,
+          "method": "original generated key-pose sheet"
+        }
       },
       "run": {
-        "src": "animals/rabbit-run.png",
+        "src": "animals-smooth/rabbit-run.png",
         "frameW": 384,
         "frameH": 256,
-        "frames": 8,
-        "fps": 14,
+        "frames": 32,
+        "fps": 56,
         "loop": true,
         "facing": "right",
         "anchor": {
           "x": 0.5,
           "y": 0.91015625
         },
-        "method": "AI generated eight key poses; local alpha cleanup, fixed-scale extraction and ground-anchor normalization"
+        "method": "Source-prioritized optical-flow interpolation from 8 original key poses; every fourth frame preserves the original pose exactly",
+        "source": {
+          "src": "animals/rabbit-run.png",
+          "frames": 8,
+          "fps": 14,
+          "method": "original generated key-pose sheet"
+        }
       },
       "alert": {
-        "src": "animals/rabbit-alert.png",
+        "src": "animals-smooth/rabbit-alert.png",
         "frameW": 384,
         "frameH": 256,
-        "frames": 8,
-        "fps": 6,
+        "frames": 32,
+        "fps": 24,
         "loop": true,
         "facing": "right",
         "anchor": {
           "x": 0.5,
           "y": 0.91015625
         },
-        "method": "AI generated eight key poses; local alpha cleanup, fixed-scale extraction and ground-anchor normalization"
+        "method": "Source-prioritized optical-flow interpolation from 8 original key poses; every fourth frame preserves the original pose exactly",
+        "source": {
+          "src": "animals/rabbit-alert.png",
+          "frames": 8,
+          "fps": 6,
+          "method": "original generated key-pose sheet"
+        }
       }
     }
   },
@@ -197,7 +251,7 @@
     "height": 1152,
     "layers": {
       "sky": {
-        "src": "layers/sky.png",
+        "src": "layers/sky-clear.png",
         "alpha": false
       },
       "mountains": {

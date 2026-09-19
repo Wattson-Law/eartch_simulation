@@ -3,6 +3,7 @@ import type { EcosystemState } from '../sim/types';
 import {
   createWildlifeWorld,
   stepWildlife,
+  WILDLIFE_COVER_PATCHES,
   WILDLIFE_ACTIVITY_LABELS,
   type WildlifeAgent,
   type WildlifeKind,
@@ -21,6 +22,16 @@ import {
   type SceneLayerKey,
   type ScenePropMeta,
 } from '../assetsPaths';
+import {
+  CLOUDS,
+  cloudPosition,
+  fishPosition,
+  drawFish as drawSceneFish,
+  drawLivingSky,
+  FALLBACK_FISH_ROUTES,
+  fitFishRoutes,
+  type FishRoute,
+} from './sceneEnvironment';
 
 interface Props {
   state: EcosystemState;
@@ -36,9 +47,25 @@ interface CritterHit {
 
 interface VisualPose {
   action: EcosystemAction;
+  previousAction: EcosystemAction;
+  frame: number;
+  previousFrame: number;
+  actionTime: number;
+  blend: number;
+  movement: number;
   facing: number;
   oldFacing: number;
   turnTime: number;
+}
+
+interface FoliageSprite {
+  id: string;
+  img?: HTMLImageElement;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  sway: number;
 }
 
 interface PlantTip {
@@ -67,7 +94,7 @@ const PROP_ANCHORS: Record<string, [number, number]> = {
   aspen: [0.29, 0.67],
   'golden-shrub': [0.76, 0.79],
   willow: [0.61, 0.77],
-  'distant-pines': [0.47, 0.53],
+  'distant-pines': [0.47, 0.64],
   'river-rocks': [0.59, 0.91],
   'moss-rock': [0.72, 0.91],
   'grass-daisies': [0.24, 0.91],
@@ -85,7 +112,34 @@ const PROP_SCALE: Record<string, number> = {
   'golden-shrub': 0.75,
   'river-rocks': 0.85,
   'moss-rock': 0.78,
+  'distant-pines': 0.68,
 };
+
+function smoothstep(value: number) {
+  const t = Math.max(0, Math.min(1, value));
+  return t * t * (3 - 2 * t);
+}
+
+function drawFoliage(ctx: CanvasRenderingContext2D, prop: FoliageSprite) {
+  ctx.save();
+  ctx.translate(prop.x, prop.y);
+  ctx.rotate(prop.sway);
+  if (prop.img) {
+    ctx.drawImage(prop.img, -prop.width / 2, -prop.height, prop.width, prop.height);
+  } else {
+    for (let blade = 0; blade < 19; blade++) {
+      const x = (blade / 18 - 0.5) * prop.width;
+      const height = prop.height * (0.35 + seeded(blade, 74) * 0.6);
+      ctx.fillStyle = blade % 2 ? '#699979' : '#80aa80';
+      ctx.beginPath();
+      ctx.moveTo(x - prop.width * 0.035, 0);
+      ctx.quadraticCurveTo(x - prop.width * 0.08, -height * 0.55, x + prop.sway * 100, -height);
+      ctx.quadraticCurveTo(x + prop.width * 0.07, -height * 0.5, x + prop.width * 0.035, 0);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
+}
 
 function seeded(i: number, salt: number) {
   const t = Math.sin(i * 12.9898 + salt * 78.233) * 43758.5453;
@@ -190,8 +244,11 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
     const generatedProps: { id: string; meta: ScenePropMeta; img: HTMLImageElement }[] = [];
     let manifest: EcosystemManifest | null = null;
     let waterMask: HTMLImageElement | null = null;
+    let fishRoutes: readonly FishRoute[] = FALLBACK_FISH_ROUTES;
     const rippleCanvas = document.createElement('canvas');
     const rippleCtx = rippleCanvas.getContext('2d');
+    const animalCanvas = document.createElement('canvas');
+    const animalCtx = animalCanvas.getContext('2d');
     const plants = {
       grass: [] as HTMLImageElement[],
       shrubs: [] as HTMLImageElement[],
@@ -232,6 +289,19 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
         if (manifest.scene.waterMask) {
           try {
             waterMask = await loadImage(manifest.scene.waterMask);
+            const maskCanvas = document.createElement('canvas');
+            maskCanvas.width = waterMask.naturalWidth;
+            maskCanvas.height = waterMask.naturalHeight;
+            const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
+            if (maskCtx) {
+              maskCtx.drawImage(waterMask, 0, 0);
+              const { data } = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
+              fishRoutes = fitFishRoutes((x, y) => {
+                if (x < 0 || x >= 1 || y < 0 || y >= 1) return false;
+                const pixel = Math.floor(y * maskCanvas.height) * maskCanvas.width + Math.floor(x * maskCanvas.width);
+                return data[pixel * 4 + 3]! > 230;
+              });
+            }
           } catch {
             waterMask = null;
           }
@@ -291,11 +361,25 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
       return generatedSheets[`${animal}:${action}`];
     };
 
+    const drawSkyMotion = (ctx: CanvasRenderingContext2D, w: number, h: number, elapsed: number, overcast: boolean) => {
+      const cloud = generatedProps.find((prop) => prop.id === 'cloud');
+      drawLivingSky(ctx, w, h, elapsed, cloud?.img, overcast);
+    };
+
+    const sheetFor = (kind: WildlifeKind, action: EcosystemAction) => {
+      const generated = generatedSheet(kind, action);
+      if (generated) return generated;
+      const prefix = kind === 'deer' ? 'elk' : kind;
+      const key = `${prefix}${action[0].toUpperCase()}${action.slice(1)}` as keyof typeof ANIMAL_SHEETS;
+      return { img: sheets[key], meta: ANIMAL_SHEETS[key] as SheetMeta };
+    };
+
     const drawCritterSheet = (
-      ctx: CanvasRenderingContext2D,
+      target: CanvasRenderingContext2D,
       agent: WildlifeAgent,
       x: number,
       y: number,
+      sceneWidth: number,
       elapsed: number,
       delta: number,
     ) => {
@@ -307,61 +391,75 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
         : kind === 'deer' && (activity === 'graze' || activity === 'drink') ? 'graze'
         : kind === 'rabbit' && activity === 'alert' ? 'alert'
         : kind === 'wolf' && activity === 'alert' && agent.activityTime > 1.2 ? 'howl' : 'idle';
-      const legacyPrefix = kind === 'deer' ? 'elk' : kind;
-      const legacyKey = `${legacyPrefix}${action[0].toUpperCase()}${action.slice(1)}` as keyof typeof ANIMAL_SHEETS;
-      const generated = generatedSheet(kind, action);
-      const fallbackImage = sheets[legacyKey];
-      const meta: SheetMeta = generated?.meta ?? ANIMAL_SHEETS[legacyKey];
-      const img = generated?.img ?? fallbackImage;
-      if (!img) return false;
+      const current = sheetFor(kind, action);
+      if (!current.img) return false;
       let pose = visualPoses.get(agent.id);
       if (!pose) {
-        pose = { action, facing: agent.facing, oldFacing: agent.facing, turnTime: 1 };
+        pose = { action, previousAction: action, frame: 0, previousFrame: 0, actionTime: agent.phase % 1.5, blend: 1, movement: moving ? 1 : 0, facing: agent.facing, oldFacing: agent.facing, turnTime: 1 };
         visualPoses.set(agent.id, pose);
+      }
+      if (pose.action !== action) {
+        pose.previousAction = pose.action;
+        pose.previousFrame = pose.frame;
+        pose.action = action;
+        pose.actionTime = 0;
+        pose.blend = 0;
       }
       if (pose.facing !== agent.facing) {
         pose.oldFacing = pose.facing;
         pose.facing = agent.facing;
         pose.turnTime = 0;
       }
-      pose.turnTime = Math.min(1, pose.turnTime + delta / 0.24);
-      pose.action = action;
+      pose.actionTime += delta;
+      pose.blend = Math.min(1, pose.blend + delta / 0.22);
+      pose.movement += ((moving ? 1 : 0) - pose.movement) * (1 - Math.exp(-delta * 12));
+      pose.turnTime = Math.min(1, pose.turnTime + delta / 0.32);
       const facing = pose.turnTime < 0.5 ? pose.oldFacing : pose.facing;
-      const turnScale = 1 - Math.sin(pose.turnTime * Math.PI) * 0.38;
-      // A stride advances with distance travelled, so slowing to a stop also
-      // slows the feet. The quiet poses use their own unsynchronised clock.
-      const frame = moving || running ? agent.gait * meta.frames : (elapsed * 0.7 + agent.phase) * (meta.fps ?? 6);
+      const turnScale = 1 - Math.sin(pose.turnTime * Math.PI) * 0.83;
+      // Distance drives feet; stationary gestures have an independent clock.
+      pose.frame = moving || running ? agent.gait * current.meta.frames : pose.actionTime * (current.meta.fps ?? 6);
       const depth = 0.84 + (agent.y - 0.61) * 0.8;
-      const desiredHeight = FRAME_HEIGHT[kind] * Math.min(ctx.canvas.clientWidth / 700, 1.4) * depth;
-      const scale = desiredHeight / meta.frameH;
-      const anchored = meta.anchor ? meta : { ...meta, anchor: { x: 0.5, y: 1 } };
+      const desiredHeight = FRAME_HEIGHT[kind] * Math.min(sceneWidth / 700, 1.4) * depth;
       const strideWave = Math.sin(agent.gait * Math.PI * 2);
-      const hop = moving && kind === 'rabbit' ? Math.max(0, strideWave) * desiredHeight * 0.16 : 0;
+      const hop = kind === 'rabbit' ? Math.max(0, strideWave) * desiredHeight * 0.13 * pose.movement : 0;
       const pounce = activity === 'pounce' ? Math.sin(Math.min(1, agent.activityTime / 0.65) * Math.PI) * desiredHeight * 0.28 : 0;
-      const breath = moving ? 0 : Math.sin(elapsed * 2.1 + agent.phase) * 0.007;
-      const weight = moving && kind !== 'rabbit' ? Math.abs(strideWave) * desiredHeight * (running ? 0.025 : 0.012) : 0;
-      ctx.save();
-      ctx.globalAlpha = agent.opacity;
-      ctx.fillStyle = 'rgba(48,69,51,0.17)';
-      ctx.beginPath();
-      ctx.ellipse(x, y + 1, desiredHeight * (kind === 'rabbit' ? 0.36 : 0.49), desiredHeight * 0.06, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.translate(x, y - hop - pounce - weight);
+      const breath = Math.sin(elapsed * 2.1 + agent.phase) * 0.007 * (1 - pose.movement);
+      const weight = kind !== 'rabbit' ? Math.abs(strideWave) * desiredHeight * (running ? 0.025 : 0.012) * pose.movement : 0;
+      target.save();
+      target.globalAlpha = agent.opacity;
+      target.fillStyle = 'rgba(48,69,51,0.17)';
+      target.beginPath();
+      target.ellipse(x, y + 1, desiredHeight * (kind === 'rabbit' ? 0.36 : 0.49), desiredHeight * 0.06, 0, 0, Math.PI * 2);
+      target.fill();
+      target.translate(x, y - hop - pounce - weight);
       const nibble = activity === 'graze' || activity === 'feed' || activity === 'drink';
       const pitch = activity === 'stalk' ? 0.025 : activity === 'feed' ? 0.09 : 0;
-      ctx.rotate(facing * (pitch + (nibble ? Math.sin(elapsed * 4 + agent.phase) * 0.012 : 0)));
-      ctx.scale(turnScale, 1 + breath - (activity === 'stalk' ? 0.055 : 0));
-      drawSheetFrameAnchored(ctx, img, anchored, frame, 0, 0, scale, (meta.facing ?? 'right') === 'right' ? facing < 0 : facing > 0);
-      ctx.restore();
+      target.rotate(facing * (pitch + (nibble ? Math.sin(elapsed * 4 + agent.phase) * 0.012 : 0)));
+      target.scale(turnScale, 1 + breath - (activity === 'stalk' ? 0.055 : 0));
+      const drawPose = (sheet: ReturnType<typeof sheetFor>, frame: number, alpha: number) => {
+        if (!sheet.img || alpha <= 0) return;
+        const meta = sheet.meta;
+        const anchored = meta.anchor ? meta : { ...meta, anchor: { x: 0.5, y: 1 } };
+        target.globalAlpha = agent.opacity * alpha;
+        drawSheetFrameAnchored(target, sheet.img, anchored, frame, 0, 0, desiredHeight / meta.frameH, (meta.facing ?? 'right') === 'right' ? facing < 0 : facing > 0);
+      };
+      const previous = sheetFor(kind, pose.previousAction);
+      const blend = previous.img ? smoothstep(pose.blend) : 1;
+      if (blend < 1) {
+        drawPose(previous, pose.previousFrame, 1 - blend);
+        // Add premultiplied pose weights on the isolated animal surface. This
+        // avoids the transparent dip of a normal source-over crossfade.
+        target.globalCompositeOperation = 'lighter';
+      }
+      drawPose(current, pose.frame, blend);
+      target.restore();
       if (running && moving && agent.opacity > 0.5) {
-        // Fleeting ground dust behind the feet gives the sprint weight without
-        // hiding the illustration or adding permanent motion trails.
         for (let i = 0; i < 3; i++) {
           const age = (agent.gait * 1.4 + i / 3) % 1;
-          ctx.fillStyle = `rgba(191,170,127,${(1 - age) * 0.2})`;
-          ctx.beginPath();
-          ctx.ellipse(x - facing * desiredHeight * (0.25 + age * 0.5), y - age * desiredHeight * 0.08, desiredHeight * (0.018 + age * 0.06), desiredHeight * (0.015 + age * 0.035), 0, 0, Math.PI * 2);
-          ctx.fill();
+          target.fillStyle = `rgba(191,170,127,${(1 - age) * 0.2})`;
+          target.beginPath();
+          target.ellipse(x - facing * desiredHeight * (0.25 + age * 0.5), y - age * desiredHeight * 0.08, desiredHeight * (0.018 + age * 0.06), desiredHeight * (0.015 + age * 0.035), 0, 0, Math.PI * 2);
+          target.fill();
         }
       }
       return true;
@@ -380,27 +478,27 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
       return true;
     };
 
-    const drawGeneratedProp = (prop: (typeof generatedProps)[number], index: number, w: number, h: number, elapsed: number) => {
-      const sourceW = manifest?.scene?.width ?? 2048;
-      const sourceH = manifest?.scene?.height ?? 1152;
-      const scale = Math.min(w / sourceW, h / sourceH);
-      const drawW = sourceW * scale;
-      const drawH = sourceH * scale;
-      const offsetX = (w - drawW) / 2;
-      const offsetY = (h - drawH) / 2;
-        const [anchorX, anchorY] = PROP_ANCHORS[prop.id] ?? [0.5, 0.86];
-        const propW = prop.meta.width * scale * (PROP_SCALE[prop.id] ?? 1);
-        const propH = prop.meta.height * scale * (PROP_SCALE[prop.id] ?? 1);
-        const baseX = offsetX + anchorX * drawW;
-        const baseY = offsetY + anchorY * drawH;
-        const isPlant = ['pine-cluster', 'pine', 'aspen', 'golden-shrub', 'willow', 'grass-daisies', 'reeds', 'grass-flowers'].includes(prop.id);
-        const sway = isPlant ? Math.sin(elapsed * 0.8 + index * 0.9) * 0.02 : 0;
-        const drift = prop.id === 'cloud' ? Math.sin(elapsed * 0.08 + index) * drawW * 0.012 : 0;
-        ctx.save();
-        ctx.translate(baseX + drift, baseY);
-        ctx.rotate(sway);
-        ctx.drawImage(prop.img, -propW / 2, -propH, propW, propH);
-        ctx.restore();
+    const prepareFoliage = (w: number, h: number, elapsed: number): FoliageSprite[] => {
+      const scale = Math.min(w / (manifest?.scene?.width ?? 2048), h / (manifest?.scene?.height ?? 1152));
+      const sprites: FoliageSprite[] = generatedProps.filter((prop) => prop.id !== 'cloud').map((prop, index) => {
+        const [x, y] = PROP_ANCHORS[prop.id] ?? [0.5, 0.86];
+        const plant = !['river-rocks', 'moss-rock'].includes(prop.id);
+        return { id: prop.id, img: prop.img, x: x * w, y: y * h, width: prop.meta.width * scale * (PROP_SCALE[prop.id] ?? 1), height: prop.meta.height * scale * (PROP_SCALE[prop.id] ?? 1), sway: plant ? Math.sin(elapsed * 0.8 + index * 0.9) * 0.014 : 0 };
+      });
+      for (const patch of WILDLIFE_COVER_PATCHES) {
+        const count = patch.id === 'left-tall-grass' ? 7 : 3;
+        for (let i = 0; i < count; i++) {
+          const offset = i / (count - 1) * 2 - 1;
+          const prop = generatedProps.find((p) => p.id === (i % 2 ? 'grass-flowers' : 'grass-daisies'));
+          const height = patch.height * h * (0.64 + (1 - Math.abs(offset)) * 0.45);
+          const x = patch.x + patch.rx * offset * 0.86;
+          const y = patch.y + patch.ry * (0.38 + 0.12 * Math.sin(i * 2.3));
+          const visitor = wildlife.agents.find((agent) => Math.hypot(agent.x - x, (agent.y - y) * 0.5625) < 0.065);
+          const rustle = visitor ? Math.min(1, Math.hypot(visitor.vx, visitor.vy) / 0.06) * Math.sin(elapsed * 9 + i) * 0.045 : 0;
+          sprites.push({ id: `${patch.id}-${i}`, img: prop?.img, x: x * w, y: y * h, width: height * (prop ? prop.meta.width / prop.meta.height : 1.4), height, sway: Math.sin(elapsed * 1.1 + i * 0.7) * 0.018 + rustle });
+        }
+      }
+      return sprites.sort((a, b) => a.y - b.y);
     };
 
     const drawWaterMotion = (ctx: CanvasRenderingContext2D, w: number, h: number, elapsed: number) => {
@@ -414,6 +512,16 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
         rippleCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
         rippleCtx.clearRect(0, 0, w, h);
         rippleCtx.save();
+        drawSceneFish(rippleCtx, w, h, elapsed, fishRoutes);
+        rippleCtx.strokeStyle = 'rgba(135,206,215,0.18)';
+        rippleCtx.lineWidth = 3;
+        for (let i = 0; i < 5; i++) {
+          const y = h * (0.61 + ((i * 0.073 + elapsed * 0.012) % 0.34));
+          const x = w * (0.48 + ((i * 0.11 + elapsed * 0.01) % 0.34));
+          rippleCtx.beginPath();
+          rippleCtx.ellipse(x, y, w * 0.03, h * 0.006, 0, 0, Math.PI * 2);
+          rippleCtx.stroke();
+        }
         rippleCtx.strokeStyle = 'rgba(255,255,255,0.42)';
         rippleCtx.lineWidth = 1.5;
         for (let i = 0; i < 9; i++) {
@@ -442,6 +550,7 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
       ctx.lineTo(w * 0.72, h);
       ctx.quadraticCurveTo(w * 0.72, h * 0.9, w * 0.64, h * 0.78);
       ctx.clip();
+      if (!sceneImages.river) drawSceneFish(ctx, w, h, elapsed, FALLBACK_FISH_ROUTES);
       ctx.strokeStyle = 'rgba(255,255,255,0.42)';
       ctx.lineWidth = 1.5;
       for (let i = 0; i < 9; i++) {
@@ -534,6 +643,8 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
       g.addColorStop(1, c2);
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, w, h);
+      drawSceneLayer(ctx, 'sky', w, h);
+      drawSkyMotion(ctx, w, h, elapsed, s.rainfall > 0.55);
 
       // —— 远山 ——
       const mt = groundColors(s.season, s.fire);
@@ -644,11 +755,11 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
       // Generated layers replace their matching procedural counterpart while
       // any missing file remains covered by the original drawing above.
       if (hasSceneArt) {
-        for (const key of ['sky', 'mountains', 'meadow', 'forestBack', 'river'] as const) {
+        for (const key of ['mountains', 'meadow', 'forestBack', 'river'] as const) {
           drawSceneLayer(ctx, key, w, h);
         }
-        drawWaterMotion(ctx, w, h, elapsed);
       }
+      drawWaterMotion(ctx, w, h, elapsed);
 
       const { treeN, shrubN, grassN } = plantCounts(s);
       const hasTrees = plants.trees.length > 0;
@@ -725,28 +836,51 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
       ctx.restore();
 
       const hits: CritterHit[] = [];
-      const depthItems = [
-        ...generatedProps.map((prop, index) => ({ y: PROP_ANCHORS[prop.id]?.[1] ?? 0.86, prop, index, agent: null as WildlifeAgent | null })),
-        ...wildlife.agents.map((agent) => ({ y: agent.y, prop: null as (typeof generatedProps)[number] | null, index: 0, agent })),
-      ].sort((a, b) => a.y - b.y);
-      for (const item of depthItems) {
-        if (item.prop) {
-          drawGeneratedProp(item.prop, item.index, w, h, elapsed);
-          continue;
-        }
-        const agent = item.agent!;
+      const foliage = prepareFoliage(w, h, elapsed);
+      for (const prop of foliage) drawFoliage(ctx, prop);
+      // Reuse one small offscreen surface. Leaf alpha masks reveal each animal
+      // continuously as it walks past the shelter, instead of flipping a whole
+      // sprite from in front to behind when its feet cross a sorting line.
+      const bufferW = Math.ceil(FRAME_HEIGHT.deer * Math.min(w / 700, 1.4) * 3.6);
+      const bufferH = Math.ceil(FRAME_HEIGHT.deer * Math.min(w / 700, 1.4) * 2.3);
+      if (animalCanvas.width !== Math.ceil(bufferW * dpr) || animalCanvas.height !== Math.ceil(bufferH * dpr)) {
+        animalCanvas.width = Math.ceil(bufferW * dpr);
+        animalCanvas.height = Math.ceil(bufferH * dpr);
+      }
+      for (const agent of [...wildlife.agents].sort((a, b) => a.y - b.y)) {
         if (agent.opacity < 0.05) continue;
         const x = agent.x * w;
         const y = agent.y * h;
         const drawnHeight = FRAME_HEIGHT[agent.kind] * Math.min(w / 700, 1.4) * (0.84 + (agent.y - 0.61) * 0.8);
         hits.push({ agent, hitX: x, hitY: y - drawnHeight * 0.42, hitR: Math.max(9, drawnHeight * 0.4) });
-        if (!drawCritterSheet(ctx, agent, x, y, elapsed, motionDelta)) {
-          ctx.save();
-          ctx.globalAlpha = agent.opacity;
-          ctx.font = `${drawnHeight * 0.7}px serif`;
-          ctx.textAlign = 'center';
-          ctx.fillText(agent.kind === 'rabbit' ? '🐇' : agent.kind === 'deer' ? '🦌' : '🐺', x, y);
-          ctx.restore();
+        const target = animalCtx ?? ctx;
+        const left = x - bufferW / 2;
+        const top = y - bufferH * 0.84;
+        if (animalCtx) {
+          animalCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          animalCtx.clearRect(0, 0, bufferW, bufferH);
+          animalCtx.translate(-left, -top);
+        }
+        if (!drawCritterSheet(target, agent, x, y, w, elapsed, motionDelta)) {
+          target.save();
+          target.globalAlpha = agent.opacity;
+          target.font = `${drawnHeight * 0.7}px serif`;
+          target.textAlign = 'center';
+          target.fillText(agent.kind === 'rabbit' ? '🐇' : agent.kind === 'deer' ? '🦌' : '🐺', x, y);
+          target.restore();
+        }
+        if (animalCtx) {
+          animalCtx.save();
+          animalCtx.globalCompositeOperation = 'destination-out';
+          for (const prop of foliage) {
+            if (Math.abs(prop.x - x) > prop.width * 0.62 + drawnHeight || prop.y < y - drawnHeight * 1.5 || prop.y - prop.height > y + drawnHeight * 0.15) continue;
+            const occlusion = smoothstep((prop.y / h - agent.y + 0.018) / 0.036);
+            if (occlusion <= 0) continue;
+            animalCtx.globalAlpha = occlusion;
+            drawFoliage(animalCtx, prop);
+          }
+          animalCtx.restore();
+          ctx.drawImage(animalCanvas, left, top, bufferW, bufferH);
         }
       }
       for (const id of visualPoses.keys()) {
@@ -766,7 +900,14 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
           canvas.dataset.wildlife = JSON.stringify({
             time: wildlife.time,
             observation: wildlife.observation,
-            agents: wildlife.agents.map(({ id, kind, x, y, vx, vy, facing, activity, gait, opacity }) => ({ id, kind, x, y, vx, vy, facing, activity, gait, opacity })),
+            scene: { sun: true, clouds: CLOUDS.length, fish: fishRoutes.length },
+            environment: {
+              clouds: CLOUDS.map((_, index) => cloudPosition(index, elapsed)),
+              fish: (waterMask ? fishRoutes : sceneImages.river ? [] : FALLBACK_FISH_ROUTES).map((route) => ({ ...fishPosition(route, elapsed), size: route.size })),
+              time: elapsed,
+            },
+            poses: [...visualPoses.entries()].map(([id, pose]) => ({ id, action: pose.action, blend: pose.blend, frame: pose.frame })),
+            agents: wildlife.agents.map(({ id, kind, x, y, vx, vy, facing, activity, gait, opacity, cover }) => ({ id, kind, x, y, vx, vy, facing, activity, gait, opacity, cover })),
           });
         }
       }
@@ -874,7 +1015,7 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
         ref={ref}
         className="eco-scene-canvas"
         role="img"
-        aria-label="黄石河谷风景，灰狼、美洲赤鹿与野兔在草甸和森林间活动"
+        aria-label="阳光和流云下的黄石河谷，灰狼、美洲赤鹿与野兔穿过草丛，游鱼在水中摆尾"
         onMouseMove={onMove}
         onClick={onClick}
         onMouseLeave={onLeave}

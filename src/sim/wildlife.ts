@@ -13,7 +13,8 @@ export type WildlifeActivity =
   | 'flee'
   | 'pounce'
   | 'feed'
-  | 'hide';
+  | 'hide'
+  | 'emerge';
 
 export interface WildlifeObservation {
   text: string;
@@ -36,6 +37,8 @@ export interface WildlifeAgent {
   gait: number;
   distance: number;
   opacity: number;
+  cover?: number;
+  coverId?: string;
   targetId?: string;
   homeX?: number;
   homeY?: number;
@@ -87,6 +90,11 @@ const MEADOWS = [
 const WILLOW = { x: 0.61, y: 0.77, r: 0.065 };
 const BOULDER = { x: 0.6, y: 0.88, r: 0.075 };
 
+export const WILDLIFE_COVER_PATCHES = [
+  { id: 'left-tall-grass', x: 0.3, y: 0.785, rx: 0.16, ry: 0.065, height: 0.12 },
+  { id: 'right-rushes', x: 0.855, y: 0.745, rx: 0.055, ry: 0.045, height: 0.1 },
+] as const;
+
 export const WILDLIFE_LABELS: Record<WildlifeKind, string> = {
   rabbit: '野兔',
   deer: '美洲赤鹿',
@@ -105,6 +113,7 @@ export const WILDLIFE_ACTIVITY_LABELS: Record<WildlifeActivity, string> = {
   pounce: '扑击',
   feed: '进食',
   hide: '隐蔽',
+  emerge: '探出',
 };
 
 export function isWalkable(x: number, y: number): boolean {
@@ -224,12 +233,14 @@ function createAgent(kind: WildlifeKind, index: number): WildlifeAgent {
     vx: 0,
     vy: 0,
     facing: hash(seed, 8) > 0.5 ? 1 : -1,
-    activity: kind === 'wolf' ? 'roam' : index % 2 === 0 ? 'graze' : 'rest',
+    activity: kind === 'rabbit' && index === 0 ? 'hide' : kind === 'wolf' ? 'roam' : index % 2 === 0 ? 'graze' : 'rest',
     activityTime: hash(seed, 11) * 3,
     phase: hash(seed, 12) * 10,
     gait: 0,
     distance: 0,
     opacity: 1,
+    cover: coverDepth(p.x, p.y),
+    coverId: nearestCoverPatch(p.x, p.y)?.id,
     homeX: p.x,
     homeY: p.y,
     goalX: p.x,
@@ -241,7 +252,7 @@ function createAgent(kind: WildlifeKind, index: number): WildlifeAgent {
 function startingPoint(kind: WildlifeKind, index: number) {
   const points: Record<WildlifeKind, { x: number; y: number }[]> = {
     rabbit: [
-      { x: 0.18, y: 0.78 },
+      { x: 0.19, y: 0.8 },
       { x: 0.28, y: 0.82 },
       { x: 0.4, y: 0.75 },
       { x: 0.22, y: 0.69 },
@@ -387,7 +398,12 @@ function updateHunt(world: WildlifeWorld, dt: number, predationEvent: PendingPre
     setActivity(prey, 'hide');
     predator.vx *= 0.75;
     predator.vy *= 0.75;
-    steerTo(prey, safePointFor(prey), dt, speedFor(prey.kind, 'flee') * 0.6);
+    steerTo(prey, coverEntryPoint(prey), dt, speedFor(prey.kind, 'flee') * 0.6);
+    if ((prey.cover ?? 0) > 0.65 && hunt.elapsed > 1.1) {
+      const exit = coverExitPoint(prey);
+      prey.goalX = exit.x;
+      prey.goalY = exit.y;
+    }
     if (hunt.elapsed > 1.8) {
       predator.targetId = undefined;
       prey.targetId = undefined;
@@ -399,8 +415,13 @@ function updateHunt(world: WildlifeWorld, dt: number, predationEvent: PendingPre
     setActivity(prey, 'hide');
     predator.vx *= 0.75;
     predator.vy *= 0.75;
-    steerTo(prey, safePointFor(prey), dt, speedFor(prey.kind, 'hide') * 0.55);
-    prey.opacity = hunt.elapsed < 1.8 ? 0 : approach(prey.opacity, 1, dt * 0.65);
+    steerTo(prey, coverEntryPoint(prey), dt, speedFor(prey.kind, 'hide') * 0.55);
+    if ((prey.cover ?? 0) > 0.65 && hunt.elapsed > 1.1) {
+      prey.opacity = approach(prey.opacity, 1, dt * 0.65);
+      const exit = coverExitPoint(prey);
+      prey.goalX = exit.x;
+      prey.goalY = exit.y;
+    }
     if (hunt.elapsed > 4.2 && prey.opacity > 0.92) {
       prey.hiddenTime = 0;
       predator.targetId = undefined;
@@ -413,7 +434,16 @@ function updateHunt(world: WildlifeWorld, dt: number, predationEvent: PendingPre
 
 function updateAmbientAgent(world: WildlifeWorld, agent: WildlifeAgent, dt: number) {
   agent.targetId = undefined;
-  agent.opacity = approach(agent.opacity, 1, dt * 2);
+  if (agent.opacity >= 0.98 || (agent.cover ?? 0) > 0.55) {
+    agent.opacity = approach(agent.opacity, 1, dt * 2);
+  }
+
+  if (agent.kind === 'rabbit' && agent.activity === 'hide' && agent.activityTime > 0.85) {
+    const exit = coverExitPoint(agent, agent.coverId === 'right-rushes' ? 'right-rushes' : 'left-tall-grass');
+    setActivity(agent, 'emerge');
+    agent.goalX = exit.x;
+    agent.goalY = exit.y;
+  }
 
   const danger = nearbyDanger(world, agent);
   if (danger) {
@@ -440,6 +470,17 @@ function updateAmbientAgent(world: WildlifeWorld, agent: WildlifeAgent, dt: numb
     agent.vy *= Math.max(0, 1 - dt * 3.5);
     if (agent.activity === 'graze' && agent.activityTime > 1.1) {
       steerTo(agent, { x: agent.goalX ?? agent.x, y: agent.goalY ?? agent.y }, dt, speedFor(agent.kind, 'graze') * 0.35);
+    }
+    return;
+  }
+
+  if (agent.activity === 'emerge') {
+    const exit = { x: agent.goalX ?? agent.x, y: agent.goalY ?? agent.y };
+    steerTo(agent, exit, dt, speedFor(agent.kind, 'emerge'));
+    if (distance(agent.x, agent.y, exit.x, exit.y) < 0.018 || agent.activityTime > 2.4) {
+      setActivity(agent, agent.kind === 'rabbit' ? 'graze' : 'roam');
+      agent.goalX = agent.x;
+      agent.goalY = agent.y;
     }
     return;
   }
@@ -568,6 +609,8 @@ function integrate(agent: WildlifeAgent, dt: number) {
   agent.gait += moved * gaitScale(agent.kind, agent.activity);
   agent.phase += dt;
   if (Math.abs(agent.vx) > 0.002) agent.facing = agent.vx >= 0 ? 1 : -1;
+  agent.cover = approach(agent.cover ?? 0, coverDepth(agent.x, agent.y), dt * 3.5);
+  agent.coverId = nearestCoverPatch(agent.x, agent.y)?.id;
 }
 
 function routeGoal(agent: WildlifeAgent, goal: { x: number; y: number }) {
@@ -739,11 +782,6 @@ function riverEdgePoint(seed: number, time: number) {
   return projectToWalkable(0.38 + t * 0.22, 0.7 + hash(seed + 13, Math.floor(time)) * 0.02);
 }
 
-function safePointFor(agent: WildlifeAgent) {
-  if (agent.kind === 'deer') return projectToWalkable(0.22, 0.7);
-  return projectToWalkable(0.16 + hash(agent.seed ?? 1, 44) * 0.16, 0.78 + hash(agent.seed ?? 1, 45) * 0.05);
-}
-
 function fireSafePoint(agent: WildlifeAgent) {
   return projectToWalkable(agent.kind === 'wolf' ? 0.86 : 0.14, agent.kind === 'wolf' ? 0.7 : 0.82);
 }
@@ -751,6 +789,7 @@ function fireSafePoint(agent: WildlifeAgent) {
 function speedFor(kind: WildlifeKind, activity: WildlifeActivity) {
   if (activity === 'chase' || activity === 'flee') return kind === 'wolf' ? 0.24 : kind === 'deer' ? 0.22 : 0.18;
   if (activity === 'hide') return kind === 'deer' ? 0.12 : 0.1;
+  if (activity === 'emerge') return kind === 'rabbit' ? 0.085 : 0.07;
   if (activity === 'stalk') return 0.055;
   if (activity === 'drink' || activity === 'roam') return kind === 'wolf' ? 0.08 : 0.06;
   if (activity === 'graze') return 0.035;
@@ -775,6 +814,39 @@ function ambientDuration(agent: WildlifeAgent) {
 
 function catchDistance(kind: WildlifeKind) {
   return kind === 'deer' ? 0.045 : 0.038;
+}
+
+function coverEntryPoint(agent: WildlifeAgent) {
+  const patch = nearestCoverPatch(agent.x, agent.y) ?? WILDLIFE_COVER_PATCHES[0]!;
+  return projectToWalkable(patch.x - patch.rx * 0.24, patch.y + patch.ry * 0.12);
+}
+
+function coverExitPoint(agent: WildlifeAgent, preferredId?: (typeof WILDLIFE_COVER_PATCHES)[number]['id']) {
+  const patch = (preferredId ? WILDLIFE_COVER_PATCHES.find((p) => p.id === preferredId) : nearestCoverPatch(agent.x, agent.y)) ?? WILDLIFE_COVER_PATCHES[0]!;
+  const side = agent.x < patch.x ? -1 : 1;
+  return projectToWalkable(patch.x + patch.rx * (0.9 * side), patch.y - patch.ry * 0.78);
+}
+
+function nearestCoverPatch(x: number, y: number) {
+  return WILDLIFE_COVER_PATCHES.reduce((best, patch) => {
+    const bestDistance = best ? normalizedCoverDistance(x, y, best) : Number.POSITIVE_INFINITY;
+    const patchDistance = normalizedCoverDistance(x, y, patch);
+    return patchDistance < bestDistance ? patch : best;
+  }, null as (typeof WILDLIFE_COVER_PATCHES)[number] | null);
+}
+
+function coverDepth(x: number, y: number) {
+  let depth = 0;
+  for (const patch of WILDLIFE_COVER_PATCHES) {
+    const d = normalizedCoverDistance(x, y, patch);
+    if (d >= 1) continue;
+    depth = Math.max(depth, clamp((1 - d) / 0.55, 0, 1));
+  }
+  return depth;
+}
+
+function normalizedCoverDistance(x: number, y: number, patch: (typeof WILDLIFE_COVER_PATCHES)[number]) {
+  return Math.hypot((x - patch.x) / patch.rx, (y - patch.y) / patch.ry);
 }
 
 function byId(world: WildlifeWorld, id: string) {

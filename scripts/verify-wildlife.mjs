@@ -16,6 +16,7 @@ const { outputText } = ts.transpileModule(stripped, {
 const encoded = Buffer.from(`${outputText}\n//# sourceURL=${pathToFileURL('src/sim/wildlife.ts').href}`).toString('base64');
 const wildlife = await import(`data:text/javascript;base64,${encoded}`);
 const {
+  WILDLIFE_COVER_PATCHES,
   WILDLIFE_ACTIVITY_LABELS,
   WILDLIFE_LABELS,
   createWildlifeWorld,
@@ -58,6 +59,7 @@ function snapshot(world) {
     activityTime: Number(a.activityTime.toFixed(6)),
     gait: Number(a.gait.toFixed(6)),
     opacity: Number(a.opacity.toFixed(6)),
+    cover: Number((a.cover ?? 0).toFixed(6)),
   }));
 }
 
@@ -69,9 +71,27 @@ function visualDistance(a, b) {
   return Math.hypot(a.x - b.x, (a.y - b.y) * (9 / 16));
 }
 
+function pointCoverDepth(x, y) {
+  let depth = 0;
+  for (const patch of WILDLIFE_COVER_PATCHES) {
+    const d = Math.hypot((x - patch.x) / patch.rx, (y - patch.y) / patch.ry);
+    if (d < 1) depth = Math.max(depth, Math.max(0, Math.min(1, (1 - d) / 0.55)));
+  }
+  return depth;
+}
+
 {
   assert.equal(WILDLIFE_LABELS.wolf, '灰狼', 'species labels remain separate');
   assert.equal(WILDLIFE_ACTIVITY_LABELS.pounce, '扑击', 'activity labels export for renderer');
+  assert.equal(WILDLIFE_ACTIVITY_LABELS.emerge, '探出', 'cover emergence label is exported');
+  assert.deepEqual(
+    WILDLIFE_COVER_PATCHES.map(({ id, x, y, rx, ry }) => ({ id, x, y, rx, ry })),
+    [
+      { id: 'left-tall-grass', x: 0.3, y: 0.785, rx: 0.16, ry: 0.065 },
+      { id: 'right-rushes', x: 0.855, y: 0.745, rx: 0.055, ry: 0.045 },
+    ],
+    'cover patch geometry stays stable for renderer occlusion',
+  );
 }
 
 {
@@ -102,6 +122,34 @@ function visualDistance(a, b) {
   stepWildlife(world, 0, s);
   const afterZero = JSON.stringify({ agents: snapshot(world), time: world.time, observation: world.observation, hunt: world.hunt });
   assert.equal(afterZero, before, 'zero dt is stable');
+}
+
+{
+  const s = state({ wolves: 0 });
+  const world = createWildlifeWorld(s);
+  const rabbit = world.agents.find((a) => a.id === 'rabbit-1');
+  assert(rabbit, 'seed rabbit exists');
+  assert.equal(rabbit.activity, 'hide', 'seed rabbit starts hidden in the grass');
+  assert((rabbit.cover ?? 0) > 0.25, 'seed rabbit starts with meaningful grass cover');
+
+  let emerged = false;
+  let maxJump = 0;
+  let previous = { x: rabbit.x, y: rabbit.y, cover: rabbit.cover ?? 0, opacity: rabbit.opacity };
+  for (let frame = 0; frame < 60 * 5; frame++) {
+    stepWildlife(world, 1 / 60, s);
+    const current = world.agents.find((a) => a.id === 'rabbit-1');
+    const jump = Math.hypot(current.x - previous.x, current.y - previous.y);
+    maxJump = Math.max(maxJump, jump);
+    emerged ||= current.activity === 'emerge' || ((current.cover ?? 0) < previous.cover - 0.04 && current.opacity > 0.99);
+    previous = { x: current.x, y: current.y, cover: current.cover ?? 0, opacity: current.opacity };
+  }
+
+  const finalRabbit = world.agents.find((a) => a.id === 'rabbit-1');
+  assert(emerged, 'rabbit begins an explicit emergence from grass within five seconds');
+  assert((finalRabbit.cover ?? 0) < 0.2, 'rabbit physically exits to low grass cover');
+  assert(maxJump <= 0.085 / 60 + 0.001, `emergence max frame jump ${maxJump} stays below rabbit emerge speed`);
+  assert.equal(finalRabbit.opacity, 1, 'emerging rabbit stays opaque and relies on grass occlusion');
+  assert(pointCoverDepth(finalRabbit.x, finalRabbit.y) < 0.2, 'final rabbit position is outside the cover ellipse');
 }
 
 {
@@ -205,6 +253,7 @@ function visualDistance(a, b) {
   const startById = new Map(world.agents.map((a) => [a.id, { x: a.x, y: a.y }]));
   const minOpacityByPrey = new Map();
   let previousById = new Map(world.agents.map((a) => [a.id, { x: a.x, y: a.y }]));
+  let previousOpacityById = new Map(world.agents.map((a) => [a.id, a.opacity]));
   let maxJump = 0;
   let firstSuccessfulHuntAt = null;
   let nextEventAt = 1.8;
@@ -244,6 +293,11 @@ function visualDistance(a, b) {
       const prev = previousById.get(a.id);
       if (prev) maxJump = Math.max(maxJump, Math.hypot(a.x - prev.x, a.y - prev.y));
       previousById.set(a.id, { x: a.x, y: a.y });
+      const previousOpacity = previousOpacityById.get(a.id) ?? a.opacity;
+      if (a.opacity > previousOpacity + 1e-6 && previousOpacity < 0.98) {
+        assert((a.cover ?? 0) > 0.55, `${a.id} only regains opacity inside cover at ${t.toFixed(2)}s`);
+      }
+      previousOpacityById.set(a.id, a.opacity);
       assert(isWalkable(a.x, a.y), `${a.id} stayed on walkable land at ${t.toFixed(2)}s`);
     }
     assert(world.hunt == null || world.agents.filter((a) => a.targetId).length <= 2, 'only one active predator/prey pair is targeted');
