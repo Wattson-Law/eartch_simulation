@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local browser verification output
+/.playwright-cli/
+/output/playwright/
+/artifacts/mobile-iteration-*.png

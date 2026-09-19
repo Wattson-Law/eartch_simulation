@@ -227,7 +227,8 @@ export function drawSheetFrame(
   scale: number,
   flipX = false,
 ) {
-  const fi = ((frameIndex % meta.frames) + meta.frames) % meta.frames;
+  const total = Math.max(1, Math.floor(meta.frames));
+  const fi = ((Math.floor(frameIndex) % total) + total) % total;
   const dw = meta.frameW * scale;
   const dh = meta.frameH * scale;
   ctx.save();
@@ -259,7 +260,8 @@ export function drawSheetFrameAnchored(
   }
   const dw = meta.frameW * scale;
   const dh = meta.frameH * scale;
-  drawSheetFrame(ctx, img, meta, frameIndex, x - dw * anchor.x, y - dh * anchor.y, scale, flipX);
+  const visibleAnchorX = flipX ? 1 - anchor.x : anchor.x;
+  drawSheetFrame(ctx, img, meta, frameIndex, x - dw * visibleAnchorX, y - dh * anchor.y, scale, flipX);
 }
 
 /** Draw a frame from the generated 8×6 earth atlas without rotating its plane. */

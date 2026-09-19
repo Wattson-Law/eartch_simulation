@@ -1,6 +1,7 @@
+import { useEffect, useState } from 'react';
 import type { EcosystemState } from '../sim/types';
 import { SEASON_LABELS } from '../sim/types';
-import { ANIMAL_SHEETS, PLANT_THUMBS } from '../assetsPaths';
+import { ANIMAL_SHEETS, PLANT_THUMBS, loadEcosystemManifest, loadImage, type ScenePropMeta, type SheetMeta } from '../assetsPaths';
 
 interface Props {
   state: EcosystemState;
@@ -13,52 +14,70 @@ type Row = {
   emoji?: string;
   /** Full plant PNG thumbnail (not a spritesheet) */
   plantThumb?: string;
-  sheet?: { src: string; frameW: number; frameH: number };
+  sheet?: SheetMeta;
 };
 
+interface PanelArt {
+  grass?: ScenePropMeta;
+  shrubs?: ScenePropMeta;
+  rabbit?: SheetMeta;
+  elk?: SheetMeta;
+  wolf?: SheetMeta;
+}
+
 export function SpeciesPanel({ state }: Props) {
+  const [art, setArt] = useState<PanelArt>({});
+  useEffect(() => {
+    let cancelled = false;
+    async function available<T extends { src: string }>(meta: T | undefined): Promise<T | undefined> {
+      if (!meta) return undefined;
+      try { await loadImage(meta.src); return meta; }
+      catch { return undefined; }
+    }
+    void loadEcosystemManifest().then(async (manifest) => {
+      if (!manifest) return;
+      const [grass, shrubs, rabbit, elk, wolf] = await Promise.all([
+        available(manifest.props?.['grass-daisies']),
+        available(manifest.props?.['golden-shrub']),
+        available(manifest.animals.rabbit?.idle),
+        available(manifest.animals.elk?.idle),
+        available(manifest.animals.wolf?.idle),
+      ]);
+      if (!cancelled) setArt({ grass, shrubs, rabbit, elk, wolf });
+    });
+    return () => { cancelled = true; };
+  }, []);
+
   const rows: Row[] = [
     {
       label: '草',
       value: Math.round(state.grass),
       color: '#66bb6a',
-      plantThumb: PLANT_THUMBS.grass,
+      plantThumb: art.grass?.src ?? PLANT_THUMBS.grass,
     },
     {
       label: '灌木',
       value: Math.round(state.shrubs),
       color: '#9ccc65',
-      plantThumb: PLANT_THUMBS.shrubs,
+      plantThumb: art.shrubs?.src ?? PLANT_THUMBS.shrubs,
     },
     {
-      label: '兔子',
+      label: '野兔',
       value: Math.round(state.rabbits),
       color: '#ffb74d',
-      sheet: {
-        src: ANIMAL_SHEETS.rabbitIdle.src,
-        frameW: ANIMAL_SHEETS.rabbitIdle.frameW,
-        frameH: ANIMAL_SHEETS.rabbitIdle.frameH,
-      },
+      sheet: art.rabbit ?? ANIMAL_SHEETS.rabbitIdle,
     },
     {
       label: '美洲赤鹿',
       value: Math.round(state.elk),
       color: '#8d6e63',
-      sheet: {
-        src: ANIMAL_SHEETS.deerIdle.src,
-        frameW: ANIMAL_SHEETS.deerIdle.frameW,
-        frameH: ANIMAL_SHEETS.deerIdle.frameH,
-      },
+      sheet: art.elk ?? ANIMAL_SHEETS.elkIdle,
     },
     {
-      label: '狼',
+      label: '灰狼',
       value: Math.round(state.wolves),
       color: '#78909c',
-      sheet: {
-        src: ANIMAL_SHEETS.wolfHowl.src,
-        frameW: ANIMAL_SHEETS.wolfHowl.frameW,
-        frameH: ANIMAL_SHEETS.wolfHowl.frameH,
-      },
+      sheet: art.wolf ?? ANIMAL_SHEETS.wolfIdle,
     },
   ];
 
@@ -89,13 +108,13 @@ export function SpeciesPanel({ state }: Props) {
                 <span
                   className="species-thumb"
                   style={{
-                    width: Math.min(36, r.sheet.frameW),
-                    height: Math.min(28, r.sheet.frameH),
+                    width: 48,
+                    aspectRatio: r.sheet.frameW / r.sheet.frameH,
                     backgroundImage: `url(${r.sheet.src})`,
                     backgroundRepeat: 'no-repeat',
-                    backgroundSize: 'auto 100%',
+                    backgroundSize: `${r.sheet.frames * 100}% 100%`,
                     backgroundPosition: '0 0',
-                    imageRendering: 'pixelated',
+                    imageRendering: r.sheet.anchor ? 'auto' : 'pixelated',
                     display: 'inline-block',
                   }}
                   role="img"

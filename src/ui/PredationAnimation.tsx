@@ -1,59 +1,66 @@
 import { useEffect, useState, type CSSProperties } from 'react';
-import { ANIMAL_SHEETS } from '../assetsPaths';
+import { ANIMAL_SHEETS, loadEcosystemManifest, loadImage, type SheetMeta } from '../assetsPaths';
+import type { EcosystemState } from '../sim/types';
 
 interface Props {
-  active: boolean;
-  preyLabel: string;
-  onDone: () => void;
+  event: EcosystemState['lastPredation'];
+  paused: boolean;
 }
 
-/** CSS 狼捕兔动画 stub（CC0 精灵） */
-export function PredationAnimation({ active, preyLabel, onDone }: Props) {
-  const [show, setShow] = useState(false);
+function spriteStyle(meta: SheetMeta, height: number): CSSProperties {
+  const width = height * meta.frameW / meta.frameH;
+  return {
+    width,
+    height,
+    backgroundImage: `url(${meta.src})`,
+    backgroundSize: `${width * meta.frames}px ${height}px`,
+    animationDuration: `${meta.frames / (meta.fps ?? 8)}s`,
+    animationTimingFunction: `steps(${meta.frames}, end)`,
+    '--sheet-end': `${-width * meta.frames}px`,
+  } as CSSProperties;
+}
+
+/** A compact observation strip that never covers the landscape or readings. */
+export function PredationAnimation({ event, paused }: Props) {
+  const [sheets, setSheets] = useState<Partial<Record<'wolf' | 'elk' | 'rabbit', SheetMeta>>>({});
 
   useEffect(() => {
-    if (!active) return;
-    setShow(true);
-    const t = window.setTimeout(() => {
-      setShow(false);
-      onDone();
-    }, 1600);
-    return () => window.clearTimeout(t);
-  }, [active, onDone]);
+    let cancelled = false;
+    void loadEcosystemManifest().then(async (manifest) => {
+      if (!manifest) return;
+      const entries = await Promise.all((['wolf', 'elk', 'rabbit'] as const).map(async (animal) => {
+        const meta = manifest.animals[animal]?.run;
+        if (!meta) return null;
+        try {
+          await loadImage(meta.src);
+          return [animal, meta] as const;
+        } catch {
+          return null;
+        }
+      }));
+      if (!cancelled) setSheets(Object.fromEntries(entries.filter((entry) => entry !== null)));
+    });
+    return () => { cancelled = true; };
+  }, []);
 
-  if (!show) return null;
-
-  const isElk = preyLabel === 'elk' || preyLabel === 'deer';
-  const wolfMeta = ANIMAL_SHEETS.wolfRun;
-  const preyMeta = isElk ? ANIMAL_SHEETS.deerRun : ANIMAL_SHEETS.rabbitHop;
-
-  const wolfStyle: CSSProperties = {
-    width: wolfMeta.frameW * 1.6,
-    height: wolfMeta.frameH * 1.6,
-    backgroundImage: `url(${wolfMeta.src})`,
-    backgroundRepeat: 'no-repeat',
-    backgroundSize: `${wolfMeta.frames * 100}% 100%`,
-    backgroundPosition: '0% 0%',
-    imageRendering: 'pixelated',
-  };
-
-  const preyStyle: CSSProperties = {
-    width: preyMeta.frameW * (isElk ? 1.2 : 1.5),
-    height: preyMeta.frameH * (isElk ? 1.2 : 1.5),
-    backgroundImage: `url(${preyMeta.src})`,
-    backgroundRepeat: 'no-repeat',
-    backgroundSize: `${preyMeta.frames * 100}% 100%`,
-    backgroundPosition: '0% 0%',
-    imageRendering: 'pixelated',
-  };
+  const isElk = event?.prey === 'elk';
+  const wolf = sheets.wolf ?? ANIMAL_SHEETS.wolfRun;
+  const prey = isElk ? sheets.elk ?? ANIMAL_SHEETS.elkRun : sheets.rabbit ?? ANIMAL_SHEETS.rabbitRun;
 
   return (
-    <div className="predation-overlay" aria-live="polite">
-      <div className="predation-stage">
-        <span className="predation-wolf predation-sprite" style={wolfStyle} role="img" aria-label="狼" />
-        <span className="predation-prey predation-sprite" style={preyStyle} role="img" aria-label="猎物" />
-        <p className="predation-caption">捕食发生！</p>
+    <div className={`field-observation${paused ? ' is-paused' : ''}`}>
+      <div className="observation-copy">
+        <span className="observation-label"><span className="observation-dot" />野外观察</span>
+        <span className="observation-text" role="status">
+          {event ? `捕食记录 · ${isElk ? '美洲赤鹿' : '野兔'} × ${event.amount}` : '等待新的野外记录'}
+        </span>
       </div>
+      {event && (
+        <div className="observation-animals" aria-hidden="true">
+          <span className="observation-sprite" style={spriteStyle(wolf, 32)} />
+          <span className="observation-sprite" style={spriteStyle(prey, isElk ? 32 : 23)} />
+        </div>
+      )}
     </div>
   );
 }

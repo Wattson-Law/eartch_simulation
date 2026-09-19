@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import type { EcosystemState } from '../sim/types';
 import {
   ANIMAL_SHEETS,
-  drawSheetFrame,
   drawSheetFrameAnchored,
   loadEcosystemManifest,
   loadImage,
@@ -56,8 +55,21 @@ interface TooltipInfo {
   y: number;
 }
 
-const MAX = { rabbit: 12, deer: 8, wolf: 6 } as const;
+const MAX = { rabbit: 5, deer: 3, wolf: 2 } as const;
 const PLANT_CAP = { trees: 10, shrubs: 14, grass: 20 } as const;
+const FRAME_HEIGHT = { rabbit: 38, deer: 94, wolf: 72 } as const;
+
+function critterCounts(width: number, state: EcosystemState) {
+  // The simulation keeps full populations in the cards and chart, while the
+  // canvas shows a readable set of representative individuals on compact
+  // screens. This prevents sprite silhouettes from becoming one dark cluster.
+  const compact = width < 520;
+  return {
+    rabbitN: Math.min(compact ? 3 : MAX.rabbit, Math.max(0, Math.ceil(state.rabbits / 50))),
+    deerN: Math.min(compact ? 2 : MAX.deer, Math.max(0, Math.ceil(state.elk / 40))),
+    wolfN: Math.min(compact ? 2 : MAX.wolf, Math.max(0, Math.ceil(state.wolves / 8))),
+  };
+}
 
 const PROP_ANCHORS: Record<string, [number, number]> = {
   'pine-cluster': [0.11, 0.68],
@@ -163,7 +175,7 @@ function animSpeedMul(activity: Activity): number {
   }
 }
 
-/** 扁平插画风黄石场景（Canvas 2D + CC0 精灵） */
+/** 绘本风黄石场景（Canvas 2D，生成素材缺失时使用备用精灵）。 */
 export function EcoSceneCanvas({ state }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -310,18 +322,15 @@ export function EcoSceneCanvas({ state }: Props) {
     ) => {
       const generated = generatedSheet(kind, action);
       const fallbackImage = sheets[legacyKey];
-      const meta = generated?.meta ?? ANIMAL_SHEETS[legacyKey];
+      const meta: SheetMeta = generated?.meta ?? ANIMAL_SHEETS[legacyKey];
       const img = generated?.img ?? fallbackImage;
       if (!img) return false;
       const fps = generated?.meta.fps ?? 8;
       const frame = frameTime * fps;
-      const desiredHeight = kind === 'rabbit' ? 56 : kind === 'deer' ? 92 : 82;
-      const scale = generated ? desiredHeight / meta.frameH : kind === 'rabbit' ? 1.35 : kind === 'deer' ? 0.95 : 1.15;
-      if (generated) {
-        drawSheetFrameAnchored(ctx, img, meta, frame, x, y, scale, flip);
-      } else {
-        drawSheetFrame(ctx, img, meta, frame, x, y, scale, flip);
-      }
+      const desiredHeight = FRAME_HEIGHT[kind] * Math.min(ctx.canvas.clientWidth / 700, 1.4);
+      const scale = desiredHeight / meta.frameH;
+      const anchored = meta.anchor ? meta : { ...meta, anchor: { x: 0.5, y: 1 } };
+      drawSheetFrameAnchored(ctx, img, anchored, frame, x, y, scale, flip);
       return true;
     };
 
@@ -416,9 +425,7 @@ export function EcoSceneCanvas({ state }: Props) {
     };
 
     const rebuildCritters = (w: number, h: number, s: EcosystemState) => {
-      const rabbitN = Math.min(MAX.rabbit, Math.max(0, Math.ceil(s.rabbits / 50)));
-      const deerN = Math.min(MAX.deer, Math.max(0, Math.ceil(s.elk / 40)));
-      const wolfN = Math.min(MAX.wolf, Math.max(0, Math.ceil(s.wolves / 8)));
+      const { rabbitN, deerN, wolfN } = critterCounts(w, s);
       const next: Critter[] = [];
       for (let i = 0; i < rabbitN; i++) {
         const idn = identityFor('rabbit', i);
@@ -426,8 +433,8 @@ export function EcoSceneCanvas({ state }: Props) {
           kind: 'rabbit',
           ...idn,
           activity: pickActivity('rabbit', i, s),
-          x: 40 + seeded(i, 1) * (w * 0.45),
-          y: h * 0.72 + seeded(i, 2) * h * 0.18,
+          x: w * (0.14 + (i % 3) * 0.105),
+          y: h * (0.77 + Math.floor(i / 3) * 0.035 + seeded(i, 2) * 0.07),
           flip: seeded(i, 3) > 0.5,
           phase: seeded(i, 4) * 10,
           speed: 0.35 + seeded(i, 5) * 0.4,
@@ -442,8 +449,8 @@ export function EcoSceneCanvas({ state }: Props) {
           kind: 'deer',
           ...idn,
           activity: pickActivity('deer', i, s),
-          x: w * 0.12 + seeded(i, 11) * (w * 0.5),
-          y: h * 0.62 + seeded(i, 12) * h * 0.16,
+          x: w * (0.25 + i * 0.18),
+          y: h * (0.67 + seeded(i, 12) * 0.035),
           flip: seeded(i, 13) > 0.45,
           phase: seeded(i, 14) * 10,
           speed: 0.25 + seeded(i, 15) * 0.3,
@@ -458,8 +465,8 @@ export function EcoSceneCanvas({ state }: Props) {
           kind: 'wolf',
           ...idn,
           activity: pickActivity('wolf', i, s),
-          x: w * 0.55 + seeded(i, 21) * (w * 0.38),
-          y: h * 0.66 + seeded(i, 22) * h * 0.18,
+          x: w * (0.76 + i * 0.145),
+          y: h * (0.74 + seeded(i, 22) * 0.035),
           flip: seeded(i, 23) > 0.4,
           phase: seeded(i, 24) * 10,
           speed: 0.4 + seeded(i, 25) * 0.45,
@@ -629,23 +636,27 @@ export function EcoSceneCanvas({ state }: Props) {
       ctx.fillRect(steamX - 6, steamY, 12, 4);
 
       // —— 河流中景 ——
-      const river = ctx.createLinearGradient(w * 0.5, h * 0.55, w * 0.7, h);
-      river.addColorStop(0, '#4fc3f7');
-      river.addColorStop(1, '#0288d1');
-      ctx.fillStyle = river;
-      ctx.beginPath();
-      ctx.moveTo(w * 0.52, h * 0.55);
-      ctx.quadraticCurveTo(w * 0.48, h * 0.72, w * 0.58, h);
-      ctx.lineTo(w * 0.72, h);
-      ctx.quadraticCurveTo(w * 0.56, h * 0.72, w * 0.64, h * 0.55);
-      ctx.fill();
-      // 高光
-      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(w * 0.58, h * 0.58);
-      ctx.quadraticCurveTo(w * 0.54, h * 0.75, w * 0.62, h * 0.95);
-      ctx.stroke();
+      // Generated river art already contains the full shape. Keep the
+      // procedural fallback only when that layer is unavailable.
+      if (!sceneImages.river) {
+        const river = ctx.createLinearGradient(w * 0.5, h * 0.55, w * 0.7, h);
+        river.addColorStop(0, '#4fc3f7');
+        river.addColorStop(1, '#0288d1');
+        ctx.fillStyle = river;
+        ctx.beginPath();
+        ctx.moveTo(w * 0.52, h * 0.55);
+        ctx.quadraticCurveTo(w * 0.48, h * 0.72, w * 0.58, h);
+        ctx.lineTo(w * 0.72, h);
+        ctx.quadraticCurveTo(w * 0.56, h * 0.72, w * 0.64, h * 0.55);
+        ctx.fill();
+        // 高光
+        ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(w * 0.58, h * 0.58);
+        ctx.quadraticCurveTo(w * 0.54, h * 0.75, w * 0.62, h * 0.95);
+        ctx.stroke();
+      }
 
       // Generated layers replace their matching procedural counterpart while
       // any missing file remains covered by the original drawing above.
@@ -737,9 +748,7 @@ export function EcoSceneCanvas({ state }: Props) {
         c.activity = pickActivity(c.kind, i, s);
       }
 
-      const wantR = Math.min(MAX.rabbit, Math.max(0, Math.ceil(s.rabbits / 50)));
-      const wantD = Math.min(MAX.deer, Math.max(0, Math.ceil(s.elk / 40)));
-      const wantW = Math.min(MAX.wolf, Math.max(0, Math.ceil(s.wolves / 8)));
+      const { rabbitN: wantR, deerN: wantD, wolfN: wantW } = critterCounts(w, s);
       const curR = crittersRef.list.filter((c) => c.kind === 'rabbit').length;
       const curD = crittersRef.list.filter((c) => c.kind === 'deer').length;
       const curWw = crittersRef.list.filter((c) => c.kind === 'wolf').length;
@@ -747,16 +756,17 @@ export function EcoSceneCanvas({ state }: Props) {
         rebuildCritters(w, h, s);
       }
 
-      for (const c of crittersRef.list) {
+      for (const c of [...crittersRef.list].sort((a, b) => a.y - b.y)) {
         const mul = animSpeedMul(c.activity);
-        const bob = Math.sin(elapsed * c.speed * 4 * mul + c.phase) * 1.5;
-        const wander = Math.sin(elapsed * c.speed * mul + c.phase) * (c.activity === 'fleeing' ? 18 : 12);
+        const bob = Math.sin(elapsed * c.speed * 4 * mul + c.phase) * h * 0.003;
+        const wander = Math.sin(elapsed * c.speed * mul + c.phase) * w * (c.activity === 'fleeing' ? 0.012 : 0.007);
         const x = c.x + wander;
         const y = c.y + bob;
         const frameT = elapsed * mul + c.phase * 0.1;
         c.hitX = x;
-        c.hitY = y - 12;
-        c.hitR = c.kind === 'rabbit' ? 16 : 22;
+        const drawnHeight = FRAME_HEIGHT[c.kind] * Math.min(w / 700, 1.4);
+        c.hitY = y - drawnHeight * 0.42;
+        c.hitR = Math.max(12, drawnHeight * 0.38);
 
         if (c.kind === 'rabbit') {
           const action: EcosystemAction = c.activity === 'fleeing' ? 'run' : c.activity === 'alert' ? 'alert' : 'idle';
@@ -887,7 +897,7 @@ export function EcoSceneCanvas({ state }: Props) {
   };
   const onClick = (e: MouseEvent) => {
     const tip = hitTest(e.clientX, e.clientY);
-    if (tip) setTooltip(tip);
+    setTooltip(tip);
   };
   const onLeave = () => setTooltip(null);
 
@@ -896,6 +906,8 @@ export function EcoSceneCanvas({ state }: Props) {
       <canvas
         ref={ref}
         className="eco-scene-canvas"
+        role="img"
+        aria-label="黄石河谷风景，灰狼、美洲赤鹿与野兔在草甸和森林间活动"
         onMouseMove={onMove}
         onClick={onClick}
         onMouseLeave={onLeave}
@@ -903,7 +915,10 @@ export function EcoSceneCanvas({ state }: Props) {
       {tooltip && (
         <div
           className="eco-tooltip"
-          style={{ left: tooltip.x, top: tooltip.y }}
+          style={{
+            left: `clamp(100px, ${tooltip.x}px, calc(100% - 100px))`,
+            top: `clamp(90px, ${tooltip.y}px, calc(100% - 8px))`,
+          }}
           role="tooltip"
         >
           <div className="eco-tooltip-title">{tooltip.title}</div>

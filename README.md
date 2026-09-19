@@ -37,10 +37,13 @@ npm run preview
 - **已接入素材包**：`public/assets/ecosystem-v1/` 提供 48 帧地球图集、灰狼/美洲赤鹿/野兔的待机/移动/特殊动作、2048×1152 黄石天空/山体/草甸/森林/河流/前景图层，以及水面 mask 和树木、灌木、石头、花草、芦苇、云等 props。
 - **已完成渲染**：地球优先使用球体自转图集；黄石场景按图层合成，水面波纹、植物轻摆、云漂移、动物动作和季节/天气状态在 Canvas 2D 中循环。缺失素材仍会回退到原有程序绘制和 CC0 精灵。
 - **已提供验收页**：打开 `http://localhost:5173/eartch_simulation/?view=assets` 可逐项预览地球、动物动作和分层背景，并暂停、调 FPS、逐帧或关闭图层。
+- **手机与桌面观察**：场景保持 16:9，动物按画面宽度缩放并显示代表个体；捕食记录位于场景下方，不遮挡风景或统计。工具栏支持暂停 / 继续观察，停止时间推进与动物、环境动画。
 - **仍可迭代**：当前包是第一版统一视觉基调；后续可以按用户确认的画风继续替换单个物种或动作，不改变模拟器与资源 manifest 契约。
 - **数据约束**：动画只读取模拟状态和事件，不能直接改变种群；Gemini 用于离线素材制作，不参与运行时数值计算。
 
 完整决策见 [`PROJECT.md`](PROJECT.md)，下一轮画风、动画和素材约定见 [`docs/VISUAL_BRIEF.md`](docs/VISUAL_BRIEF.md)。
+
+帧采样与翻转锚点的回归验证：`node scripts/verify-sprite-frame-math.mjs`。修改动画后同时运行 `npm run build` 和 `npm run lint`。
 
 ## 科学假设（简化）
 
@@ -75,7 +78,7 @@ npm run preview
 3. **可复现事件日志**：每条记录来源字段，UI 与聊天解释均基于日志/状态。
 4. **叙事因果级联**：`src/sim/cascade.ts` 故事队列，与种群结算解耦。
 5. **个体悬停名片**：场景内动物/河岸柳轻量身份与行为标签（视觉层，非 Agent 模拟）。
-6. **关键动画 stub**：狼捕兔示意，由模拟捕食结果触发，不改数值。
+6. **野外观察动画**：捕食记录使用同款绘本图集逐帧播放，读取模拟捕食结果，不改数值。
 7. **素材致谢**：第三方 CC0 资源清单见 `public/assets/CREDITS.md`。
 
 ## 目录结构
@@ -100,4 +103,4 @@ public/assets/ecosystem-v1/
 
 ## 致谢
 
-美术素材均为 CC0，详见 [`public/assets/CREDITS.md`](public/assets/CREDITS.md)（Kenney Planets、Pixel Earth Animation、ScratchIO Animated Wild Animals、Kenney Foliage Pack / Foliage Sprites）。
+备用美术素材来自 CC0 资源，详见 [`public/assets/CREDITS.md`](public/assets/CREDITS.md)（Kenney Planets、Pixel Earth Animation、ScratchIO Animated Wild Animals、Kenney Foliage Pack / Foliage Sprites）。生成的绘本素材另见 `public/assets/ecosystem-v1/manifest.json` 中的来源记录，不继承备用素材的 CC0 声明。

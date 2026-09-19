@@ -8,7 +8,6 @@ import { parseCommand } from './nlp/parse';
 import { GlobeCanvas } from './ui/GlobeCanvas';
 import { EcoView } from './ui/EcoView';
 import { ChatPanel, initialChatMessages, type ChatMessage } from './ui/ChatPanel';
-import { PredationAnimation } from './ui/PredationAnimation';
 import { Disclaimer } from './ui/Disclaimer';
 import { CausalCascadePanel } from './ui/CausalCascadePanel';
 import { AssetGallery } from './ui/AssetGallery';
@@ -27,8 +26,6 @@ export default function App() {
   const [state, setState] = useState<EcosystemState>(() => createInitialState());
   const [view, setView] = useState<View>(() => initialView());
   const [messages, setMessages] = useState<ChatMessage[]>(() => initialChatMessages());
-  const [predationAnim, setPredationAnim] = useState(false);
-  const [preyKind, setPreyKind] = useState<'rabbits' | 'elk'>('rabbits');
   const [cascadeOpen, setCascadeOpen] = useState(false);
   const stateRef = useRef(state);
   const msgIdRef = useRef(2);
@@ -38,12 +35,7 @@ export default function App() {
     const id = window.setInterval(() => {
       setState((prev) => {
         if (prev.paused) return prev;
-        const next = tick(prev);
-        if (next.lastPredation) {
-          setPreyKind(next.lastPredation.prey);
-          setPredationAnim(true);
-        }
-        return next;
+        return tick(prev);
       });
     }, 1800);
     return () => window.clearInterval(id);
@@ -70,10 +62,6 @@ export default function App() {
 
     const result = applyCommand(stateRef.current, parsed.command);
     setState(result.state);
-    if (result.triggerPredationAnim && result.state.lastPredation) {
-      setPreyKind(result.state.lastPredation.prey);
-      setPredationAnim(true);
-    }
     let reply = result.reply;
     if (parsed.matched === '触发捕食观察') {
       reply =
@@ -117,13 +105,7 @@ export default function App() {
               onBack={() => setView('globe')}
               onOpenCascade={() => setCascadeOpen(true)}
               hasCascade={cascade != null}
-            />
-          )}
-          {view !== 'assets' && (
-            <PredationAnimation
-              active={predationAnim}
-              preyLabel={preyKind}
-              onDone={() => setPredationAnim(false)}
+              onTogglePause={() => handleSend(state.paused ? '继续' : '暂停')}
             />
           )}
           <CausalCascadePanel
