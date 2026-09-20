@@ -11,6 +11,7 @@ import { ChatPanel, initialChatMessages, type ChatMessage } from './ui/ChatPanel
 import { Disclaimer } from './ui/Disclaimer';
 import { CausalCascadePanel } from './ui/CausalCascadePanel';
 import { AssetGallery } from './ui/AssetGallery';
+import { GlobeToEcoTransition, type GlobeToEcoPhase } from './ui/GlobeToEcoTransition';
 import './App.css';
 
 type View = 'globe' | 'eco' | 'assets';
@@ -25,11 +26,24 @@ function initialView(): View {
 export default function App() {
   const [state, setState] = useState<EcosystemState>(() => createInitialState());
   const [view, setView] = useState<View>(() => initialView());
+  const [transitionPhase, setTransitionPhase] = useState<GlobeToEcoPhase>('idle');
   const [messages, setMessages] = useState<ChatMessage[]>(() => initialChatMessages());
   const [cascadeOpen, setCascadeOpen] = useState(false);
   const stateRef = useRef(state);
+  const viewRef = useRef(view);
+  const transitionRef = useRef<GlobeToEcoPhase>('idle');
+  const transitionTimersRef = useRef<number[]>([]);
   const msgIdRef = useRef(2);
-  stateRef.current = state;
+
+  useEffect(() => {
+    stateRef.current = state;
+    viewRef.current = view;
+    transitionRef.current = transitionPhase;
+  }, [state, transitionPhase, view]);
+
+  useEffect(() => () => {
+    transitionTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+  }, []);
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -53,6 +67,26 @@ export default function App() {
     });
   }, []);
 
+  const beginEcoTransition = useCallback(() => {
+    if (viewRef.current !== 'globe' || transitionRef.current !== 'idle') return;
+    transitionTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    transitionTimersRef.current = [];
+    transitionRef.current = 'orbit';
+    setTransitionPhase('orbit');
+    const arrival = window.setTimeout(() => {
+      viewRef.current = 'eco';
+      transitionRef.current = 'arrival';
+      setView('eco');
+      setTransitionPhase('arrival');
+    }, 380);
+    const finish = window.setTimeout(() => {
+      transitionRef.current = 'idle';
+      setTransitionPhase('idle');
+      transitionTimersRef.current = [];
+    }, 1180);
+    transitionTimersRef.current.push(arrival, finish);
+  }, []);
+
   const handleSend = useCallback((text: string) => {
     const parsed = parseCommand(text);
     if (!parsed.ok) {
@@ -71,13 +105,23 @@ export default function App() {
 
     if (result.openCascade) {
       setCascadeOpen(true);
+      viewRef.current = 'eco';
+      transitionRef.current = 'idle';
+      setTransitionPhase('idle');
       setView('eco');
-    } else if (view === 'globe') {
-      setView('eco');
+    } else if (viewRef.current === 'globe') {
+      beginEcoTransition();
     }
-  }, [pushMessages, view]);
+  }, [beginEcoTransition, pushMessages]);
 
-  const enterYellowstone = useCallback(() => setView('eco'), []);
+  const returnToGlobe = useCallback(() => {
+    transitionTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    transitionTimersRef.current = [];
+    transitionRef.current = 'idle';
+    setTransitionPhase('idle');
+    viewRef.current = 'globe';
+    setView('globe');
+  }, []);
   const cascade = latestCascade(state);
 
   return (
@@ -96,18 +140,20 @@ export default function App() {
       <main className="app-main">
         <section className="stage">
           {view === 'globe' ? (
-            <GlobeCanvas onEnterYellowstone={enterYellowstone} />
+            <GlobeCanvas onEnterYellowstone={beginEcoTransition} />
           ) : view === 'assets' ? (
             <AssetGallery onBack={() => setView('eco')} />
           ) : (
             <EcoView
               state={state}
-              onBack={() => setView('globe')}
+              onBack={returnToGlobe}
               onOpenCascade={() => setCascadeOpen(true)}
               hasCascade={cascade != null}
               onTogglePause={() => handleSend(state.paused ? '继续' : '暂停')}
+              entryTransition={transitionPhase === 'arrival'}
             />
           )}
+          <GlobeToEcoTransition phase={transitionPhase} />
           <CausalCascadePanel
             cascade={cascade}
             open={cascadeOpen}

@@ -193,6 +193,15 @@
   overflow: auto;
 }
 
+.eco-view--entering {
+  animation: eco-view-arrival 720ms cubic-bezier(.2,.8,.2,1) both;
+}
+
+@keyframes eco-view-arrival {
+  from { opacity: 0; transform: scale(1.035) translateY(12px); filter: saturate(.7) brightness(.78); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+
 .eco-toolbar {
   display: flex;
   align-items: center;
@@ -609,6 +618,109 @@ button:focus-visible, input:focus-visible {
 .phase-chase .observation-dot { background: #bc824d; }
 .phase-escaped .observation-dot { background: #709a82; }
 .scene-caption { margin: -3px 2px 2px; color: #71806a; font-size: 0.68rem; }
+
+.wildlife-status-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: -3px;
+}
+
+.wildlife-status {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 8px;
+  border: 1px solid #dbe7d2;
+  border-radius: 999px;
+  background: rgba(250, 252, 246, .9);
+  font-size: .68rem;
+  color: #5e6f5a;
+}
+
+.wildlife-status__dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #91a88a;
+  box-shadow: 0 0 0 3px rgba(145, 168, 138, .14);
+}
+
+.wildlife-status__name { font-weight: 700; white-space: nowrap; }
+.wildlife-status__activity { margin-left: auto; color: #8b6b43; white-space: nowrap; }
+.wildlife-status--graze .wildlife-status__dot,
+.wildlife-status--feed .wildlife-status__dot { background: #d59b55; box-shadow: 0 0 0 3px rgba(213, 155, 85, .16); }
+.wildlife-status--drink .wildlife-status__dot { background: #6aa7ac; box-shadow: 0 0 0 3px rgba(106, 167, 172, .16); }
+.wildlife-status--roam .wildlife-status__dot,
+.wildlife-status--emerge .wildlife-status__dot { background: #6c9e7a; box-shadow: 0 0 0 3px rgba(108, 158, 122, .16); }
+.wildlife-status--alert .wildlife-status__dot,
+.wildlife-status--stalk .wildlife-status__dot { background: #c68b4f; box-shadow: 0 0 0 3px rgba(198, 139, 79, .16); }
+.wildlife-status--chase .wildlife-status__dot,
+.wildlife-status--flee .wildlife-status__dot,
+.wildlife-status--pounce .wildlife-status__dot { background: #bd7657; box-shadow: 0 0 0 3px rgba(189, 118, 87, .16); }
+
+/* —— 从宇宙入口进入黄石的短过渡 —— */
+.globe-to-eco-transition {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  pointer-events: none;
+  color: #f5f0dc;
+  background: radial-gradient(circle at 50% 45%, rgba(43, 105, 132, .28), rgba(4, 9, 22, .94) 72%);
+  animation: transition-veil-in 380ms ease-out both;
+}
+
+.globe-to-eco-transition--arrival {
+  background: radial-gradient(circle at 50% 42%, rgba(213, 179, 117, .28), rgba(20, 35, 43, .72) 68%, rgba(20, 35, 43, .28));
+  animation: transition-arrival 800ms cubic-bezier(.16,.8,.22,1) both;
+}
+
+.globe-to-eco-transition__orbit {
+  position: absolute;
+  width: min(44vw, 300px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  transform: scale(.68);
+  animation: transition-orbit-zoom 720ms cubic-bezier(.16,.8,.22,1) both;
+}
+
+.globe-to-eco-transition--arrival .globe-to-eco-transition__orbit { transform: scale(1.42); opacity: .2; }
+.globe-to-eco-transition__planet {
+  position: absolute;
+  inset: 27%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 28%, #82cbd5 0 12%, #2a7890 48%, #123a5a 100%);
+  box-shadow: 0 0 0 8px rgba(134, 206, 219, .15), 0 0 54px rgba(91, 197, 218, .42);
+}
+
+.globe-to-eco-transition__ring {
+  position: absolute;
+  inset: 4%;
+  border: 1px solid rgba(184, 226, 226, .52);
+  border-radius: 50%;
+  transform: rotate(-18deg) scaleY(.36);
+}
+
+.globe-to-eco-transition__ring--two { inset: 15%; transform: rotate(32deg) scaleY(.26); border-color: rgba(222, 201, 150, .48); }
+.globe-to-eco-transition__copy { position: relative; z-index: 1; display: grid; gap: 6px; margin-top: min(36vw, 230px); text-align: center; text-shadow: 0 2px 12px rgba(0,0,0,.35); }
+.globe-to-eco-transition__eyebrow { font-size: .62rem; letter-spacing: .24em; color: #a5d8dc; }
+.globe-to-eco-transition__copy strong { font-size: clamp(1.1rem, 2.8vw, 1.6rem); letter-spacing: .08em; }
+.globe-to-eco-transition__copy small { color: #c4d2d0; font-size: .75rem; }
+
+@keyframes transition-veil-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes transition-orbit-zoom { from { transform: scale(.68) rotate(-8deg); opacity: .35; } to { transform: scale(1.52) rotate(12deg); opacity: 1; } }
+@keyframes transition-arrival { from { opacity: 1; } to { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .eco-view--entering,
+  .globe-to-eco-transition,
+  .globe-to-eco-transition__orbit { animation-duration: 1ms; }
+}
 
 
 .globe-actions {

@@ -1,3 +1,96 @@
+export type SceneSeason = 'spring' | 'summer' | 'autumn' | 'winter';
+export type SceneRgb = readonly [number, number, number];
+
+export interface SeasonPalette {
+  skyTop: SceneRgb;
+  skyBottom: SceneRgb;
+  far: SceneRgb;
+  near: SceneRgb;
+  carpet: SceneRgb;
+  carpetAlpha: number;
+  tint: SceneRgb;
+  tintAlpha: number;
+  snow: number;
+}
+
+export const SEASON_PALETTES: Readonly<Record<SceneSeason, SeasonPalette>> = {
+  spring: {
+    skyTop: [179, 229, 252], skyBottom: [232, 245, 233], far: [129, 199, 132], near: [174, 213, 129],
+    carpet: [165, 214, 167], carpetAlpha: 0.18, tint: [172, 213, 190], tintAlpha: 0.05, snow: 0,
+  },
+  summer: {
+    skyTop: [79, 195, 247], skyBottom: [255, 245, 157], far: [102, 187, 106], near: [156, 204, 101],
+    carpet: [129, 199, 132], carpetAlpha: 0.2, tint: [255, 230, 145], tintAlpha: 0.025, snow: 0,
+  },
+  autumn: {
+    skyTop: [255, 204, 128], skyBottom: [255, 224, 178], far: [161, 136, 127], near: [215, 204, 200],
+    carpet: [255, 152, 0], carpetAlpha: 0.12, tint: [205, 139, 93], tintAlpha: 0.09, snow: 0,
+  },
+  winter: {
+    skyTop: [144, 202, 249], skyBottom: [236, 239, 241], far: [144, 164, 174], near: [236, 239, 241],
+    carpet: [255, 255, 255], carpetAlpha: 0.35, tint: [185, 205, 218], tintAlpha: 0.13, snow: 1,
+  },
+} as const;
+
+export const SCENE_SEASONS: readonly SceneSeason[] = ['spring', 'summer', 'autumn', 'winter'];
+
+function mixNumber(a: number, b: number, amount: number) {
+  return a + (b - a) * amount;
+}
+
+function mixRgb(a: SceneRgb, b: SceneRgb, amount: number): SceneRgb {
+  return [
+    mixNumber(a[0], b[0], amount),
+    mixNumber(a[1], b[1], amount),
+    mixNumber(a[2], b[2], amount),
+  ];
+}
+
+function normalizeSeasonPosition(value: number) {
+  return ((value % SCENE_SEASONS.length) + SCENE_SEASONS.length) % SCENE_SEASONS.length;
+}
+
+export function seasonPosition(season: SceneSeason) {
+  return SCENE_SEASONS.indexOf(season);
+}
+
+/** Move through the shortest path around the four-season cycle. */
+export function advanceSeasonVisual(current: number, target: SceneSeason, delta: number, response = 2.8) {
+  const targetPosition = seasonPosition(target);
+  const currentPosition = normalizeSeasonPosition(current);
+  let difference = targetPosition - currentPosition;
+  if (difference > SCENE_SEASONS.length / 2) difference -= SCENE_SEASONS.length;
+  if (difference < -SCENE_SEASONS.length / 2) difference += SCENE_SEASONS.length;
+  return current + difference * (1 - Math.exp(-Math.max(0, delta) * response));
+}
+
+export function seasonPaletteAt(position: number): SeasonPalette {
+  const normalized = normalizeSeasonPosition(position);
+  const fromIndex = Math.floor(normalized);
+  const amount = normalized - fromIndex;
+  const from = SEASON_PALETTES[SCENE_SEASONS[fromIndex]!]!;
+  const to = SEASON_PALETTES[SCENE_SEASONS[(fromIndex + 1) % SCENE_SEASONS.length]!]!;
+  return {
+    skyTop: mixRgb(from.skyTop, to.skyTop, amount),
+    skyBottom: mixRgb(from.skyBottom, to.skyBottom, amount),
+    far: mixRgb(from.far, to.far, amount),
+    near: mixRgb(from.near, to.near, amount),
+    carpet: mixRgb(from.carpet, to.carpet, amount),
+    carpetAlpha: mixNumber(from.carpetAlpha, to.carpetAlpha, amount),
+    tint: mixRgb(from.tint, to.tint, amount),
+    tintAlpha: mixNumber(from.tintAlpha, to.tintAlpha, amount),
+    snow: mixNumber(from.snow, to.snow, amount),
+  };
+}
+
+export function approachVisual(current: number, target: number, delta: number, response = 4) {
+  return current + (target - current) * (1 - Math.exp(-Math.max(0, delta) * response));
+}
+
+export function rgba(rgb: SceneRgb, alpha = 1) {
+  return `rgba(${Math.round(rgb[0])},${Math.round(rgb[1])},${Math.round(rgb[2])},${Math.max(0, Math.min(1, alpha))})`;
+}
+
 /** Continuous scene motion, driven by the same pausable clock as the animals. */
 export const CLOUDS = [
   { start: 0.22, y: 0.23, width: 0.17, speed: 0.0042, opacity: 0.88 },
@@ -11,12 +104,13 @@ export function cloudPosition(index: number, seconds: number) {
   return ((cloud.start + seconds * cloud.speed + cloud.width / 2) % (1 + cloud.width)) - cloud.width / 2;
 }
 
-export function drawLivingSky(ctx: CanvasRenderingContext2D, w: number, h: number, seconds: number, cloudImage?: HTMLImageElement, overcast = false) {
+export function drawLivingSky(ctx: CanvasRenderingContext2D, w: number, h: number, seconds: number, cloudImage?: HTMLImageElement, overcast: boolean | number = false) {
   const sunX = w * (0.565 + Math.sin(seconds * 0.003) * 0.035);
   const sunY = h * (0.175 - Math.sin(seconds * 0.002) * 0.02);
   const radius = w * 0.027;
+  const overcastStrength = typeof overcast === 'number' ? Math.max(0, Math.min(1, overcast)) : overcast ? 1 : 0;
   ctx.save();
-  ctx.globalAlpha = overcast ? 0.4 : 1;
+  ctx.globalAlpha = 1 - overcastStrength * 0.62;
   const halo = ctx.createRadialGradient(sunX, sunY, radius * 0.65, sunX, sunY, radius * 2.6);
   halo.addColorStop(0, 'rgba(255,232,160,0.42)');
   halo.addColorStop(1, 'rgba(255,239,192,0)');
@@ -39,7 +133,7 @@ export function drawLivingSky(ctx: CanvasRenderingContext2D, w: number, h: numbe
     const y = cloud.y * h + Math.sin(seconds * 0.12 + index) * h * 0.002;
     const width = cloud.width * w;
     ctx.save();
-    ctx.globalAlpha = cloud.opacity;
+    ctx.globalAlpha = cloud.opacity * (1 - overcastStrength * 0.18);
     if (cloudImage) {
       const height = width * cloudImage.naturalHeight / cloudImage.naturalWidth;
       ctx.drawImage(cloudImage, x - width / 2, y - height / 2, width, height);
@@ -53,6 +147,10 @@ export function drawLivingSky(ctx: CanvasRenderingContext2D, w: number, h: numbe
     }
     ctx.restore();
   });
+  if (overcastStrength > 0.001) {
+    ctx.fillStyle = `rgba(77,99,116,${overcastStrength * 0.12})`;
+    ctx.fillRect(0, 0, w, h * 0.62);
+  }
 }
 
 export interface FishRoute {

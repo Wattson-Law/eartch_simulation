@@ -4,7 +4,30 @@ import ts from 'typescript';
 
 const source = await readFile(new URL('../src/ui/sceneEnvironment.ts', import.meta.url), 'utf8');
 const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 } });
-const { CLOUDS, cloudPosition, FISH_ROUTES, fishPosition, fitFishRoutes } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
+const {
+  CLOUDS,
+  cloudPosition,
+  FISH_ROUTES,
+  fishPosition,
+  fitFishRoutes,
+  advanceSeasonVisual,
+  approachVisual,
+  seasonPaletteAt,
+  rgba,
+} = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
+
+assert.equal(advanceSeasonVisual(0, 'winter', 0), 0, 'A zero visual delta must keep the season position still');
+assert.ok(advanceSeasonVisual(3.8, 'spring', 0.25) > 3.8, 'Season interpolation should take the short wrapped path');
+assert.ok(approachVisual(0, 1, 0.4, 3) > 0 && approachVisual(0, 1, 0.4, 3) < 1, 'Visual approach must stay below its target');
+assert.ok(approachVisual(1, 0, 0.4, 3) > 0 && approachVisual(1, 0, 0.4, 3) < 1, 'Visual approach must stay above its target');
+for (const position of [0, 0.5, 1.5, 2.5, 3.99, -0.25]) {
+  const palette = seasonPaletteAt(position);
+  for (const channel of [...palette.skyTop, ...palette.skyBottom, ...palette.far, ...palette.near, ...palette.carpet]) {
+    assert.ok(channel >= 0 && channel <= 255, 'Interpolated colour channels stay in byte range');
+  }
+  assert.ok(palette.snow >= 0 && palette.snow <= 1, 'Snow interpolation stays within 0–1');
+}
+assert.equal(rgba([12.4, 34.6, 255.2], 1.4), 'rgba(12,35,255,1)', 'RGBA helper clamps alpha and rounds channels');
 
 for (const [index, cloud] of CLOUDS.entries()) {
   assert.ok(cloudPosition(index, 10) - cloudPosition(index, 0) > .025, 'Cloud motion must be visible over ten seconds');

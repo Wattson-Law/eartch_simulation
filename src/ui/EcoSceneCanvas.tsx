@@ -5,8 +5,10 @@ import {
   stepWildlife,
   WILDLIFE_COVER_PATCHES,
   WILDLIFE_ACTIVITY_LABELS,
+  WILDLIFE_LABELS,
   type WildlifeAgent,
   type WildlifeKind,
+  type WildlifeActivity,
   type WildlifeObservation,
 } from '../sim/wildlife';
 import {
@@ -30,12 +32,24 @@ import {
   drawLivingSky,
   FALLBACK_FISH_ROUTES,
   fitFishRoutes,
+  advanceSeasonVisual,
+  approachVisual,
+  rgba,
+  seasonPaletteAt,
+  seasonPosition,
   type FishRoute,
 } from './sceneEnvironment';
 
 interface Props {
   state: EcosystemState;
   onObservation: (observation: WildlifeObservation) => void;
+  onStatus?: (statuses: WildlifeStatus[]) => void;
+}
+
+export interface WildlifeStatus {
+  kind: WildlifeKind;
+  activity: WildlifeActivity;
+  moving: boolean;
 }
 
 interface CritterHit {
@@ -203,11 +217,12 @@ function tooltipFor(hit: CritterHit): TooltipInfo {
 }
 
 /** 绘本风黄石场景（Canvas 2D，生成素材缺失时使用备用精灵）。 */
-export function EcoSceneCanvas({ state, onObservation }: Props) {
+export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const stateRef = useRef(state);
   const observationRef = useRef(onObservation);
+  const statusRef = useRef(onStatus);
   const [tooltip, setTooltip] = useState<TooltipInfo | null>(null);
   const selectedRef = useRef<string | null>(null);
   const hitRef = useRef<{ critters: CritterHit[]; plants: PlantTip[] }>({
@@ -218,7 +233,8 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
   useEffect(() => {
     stateRef.current = state;
     observationRef.current = onObservation;
-  }, [state, onObservation]);
+    statusRef.current = onStatus;
+  }, [state, onObservation, onStatus]);
 
   useEffect(() => {
     const canvas = ref.current;
@@ -235,8 +251,25 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
     let previousNow = t0;
     const wildlife = createWildlifeWorld(stateRef.current);
     const visualPoses = new Map<string, VisualPose>();
+    let visualSeason = seasonPosition(stateRef.current.season);
+    let visualRain = stateRef.current.rainfall;
+    let visualFire = stateRef.current.fire ? 1 : 0;
     let lastObservation = '';
     let lastUiUpdate = 0;
+    const statusPriority: Record<WildlifeActivity, number> = {
+      feed: 8,
+      graze: 7,
+      drink: 6,
+      chase: 5,
+      flee: 5,
+      pounce: 5,
+      stalk: 4,
+      emerge: 3,
+      roam: 2,
+      alert: 2,
+      hide: 1,
+      rest: 0,
+    };
 
     const sheets: Partial<Record<keyof typeof ANIMAL_SHEETS, HTMLImageElement>> = {};
     const generatedSheets: Partial<Record<string, { img: HTMLImageElement; meta: SheetMeta }>> = {};
@@ -377,7 +410,7 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
       return generatedSheets[`${animal}:${action}`];
     };
 
-    const drawSkyMotion = (ctx: CanvasRenderingContext2D, w: number, h: number, elapsed: number, overcast: boolean) => {
+    const drawSkyMotion = (ctx: CanvasRenderingContext2D, w: number, h: number, elapsed: number, overcast: boolean | number) => {
       const cloud = generatedProps.find((prop) => prop.id === 'cloud');
       drawLivingSky(ctx, w, h, elapsed, cloud?.img, overcast);
     };
@@ -449,7 +482,7 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
       target.fill();
       target.translate(x, y - hop - pounce - weight);
       const nibble = activity === 'graze' || activity === 'feed' || activity === 'drink';
-      const pitch = activity === 'stalk' ? 0.025 : activity === 'feed' ? 0.09 : 0;
+      const pitch = activity === 'stalk' ? 0.025 : activity === 'feed' ? 0.09 : activity === 'drink' ? 0.075 : activity === 'graze' ? 0.055 : 0;
       target.rotate(facing * (pitch + (nibble ? Math.sin(elapsed * 4 + agent.phase) * 0.012 : 0)));
       target.scale(turnScale, 1 + breath - (activity === 'stalk' ? 0.055 : 0));
       const drawPose = (sheet: ReturnType<typeof sheetFor>, frame: number, alpha: number) => {
@@ -469,10 +502,56 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
       }
       drawPose(current, pose.frame, blend);
       target.restore();
-      if (running && moving && agent.opacity > 0.5) {
+
+      // Sprite sheets carry the broad silhouette. These small overlays make
+      // the intent of a gesture readable even when the source clip is idle:
+      // a grazing animal bends toward a few blades, a wolf worries a morsel,
+      // and a drinking animal creates a ring in the water.
+      if (nibble && agent.opacity > 0.35) {
+        const gesture = (Math.sin(elapsed * (activity === 'drink' ? 3.6 : 5.2) + agent.phase) + 1) * 0.5;
+        const headX = x + facing * desiredHeight * (kind === 'rabbit' ? 0.16 : 0.23);
+        const headY = y - desiredHeight * (kind === 'rabbit' ? 0.5 : 0.69) + gesture * desiredHeight * 0.035;
+        target.save();
+        target.globalAlpha = agent.opacity * (0.48 + gesture * 0.2);
+        target.lineWidth = Math.max(0.75, desiredHeight * 0.018);
+        if (activity === 'drink') {
+          target.strokeStyle = 'rgba(226,244,230,0.72)';
+          target.beginPath();
+          target.ellipse(headX, y + desiredHeight * 0.035, desiredHeight * (0.18 + gesture * 0.06), desiredHeight * 0.025, 0, 0, Math.PI * 2);
+          target.stroke();
+          target.strokeStyle = 'rgba(141,204,196,0.58)';
+          target.beginPath();
+          target.ellipse(headX, y + desiredHeight * 0.035, desiredHeight * (0.08 + gesture * 0.04), desiredHeight * 0.012, 0, 0, Math.PI * 2);
+          target.stroke();
+        } else if (activity === 'feed') {
+          target.fillStyle = '#a8784d';
+          target.beginPath();
+          target.ellipse(headX + facing * desiredHeight * 0.11, headY + desiredHeight * 0.04, desiredHeight * 0.055, desiredHeight * 0.035, 0, 0, Math.PI * 2);
+          target.fill();
+          target.strokeStyle = 'rgba(244,201,137,0.7)';
+          target.beginPath();
+          target.moveTo(headX + facing * desiredHeight * 0.04, headY + desiredHeight * 0.1);
+          target.lineTo(headX + facing * desiredHeight * 0.16, headY + desiredHeight * 0.1 + gesture * desiredHeight * 0.025);
+          target.stroke();
+        } else {
+          target.strokeStyle = 'rgba(111,157,91,0.78)';
+          for (let blade = 0; blade < 3; blade++) {
+            const bx = headX + facing * desiredHeight * (0.04 + blade * 0.065);
+            const by = headY + desiredHeight * 0.14;
+            target.beginPath();
+            target.moveTo(bx, by);
+            target.quadraticCurveTo(bx - facing * desiredHeight * 0.02, by - desiredHeight * (0.08 + blade * 0.012), bx + facing * desiredHeight * 0.02, by - desiredHeight * (0.13 + gesture * 0.025));
+            target.stroke();
+          }
+        }
+        target.restore();
+      }
+
+      if (moving && agent.opacity > 0.5) {
         for (let i = 0; i < 3; i++) {
           const age = (agent.gait * 1.4 + i / 3) % 1;
-          target.fillStyle = `rgba(191,170,127,${(1 - age) * 0.2})`;
+          const dustAlpha = running ? 0.2 : 0.1;
+          target.fillStyle = `rgba(191,170,127,${(1 - age) * dustAlpha})`;
           target.beginPath();
           target.ellipse(x - facing * desiredHeight * (0.25 + age * 0.5), y - age * desiredHeight * 0.08, desiredHeight * (0.018 + age * 0.06), desiredHeight * (0.015 + age * 0.035), 0, 0, Math.PI * 2);
           target.fill();
@@ -595,33 +674,19 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
       ctx.fillRect(x - 1.5, y + size * 0.2, 3, size * 0.45);
     };
 
-    const plantCounts = (s: EcosystemState) => {
+    const plantCounts = (s: EcosystemState, fireStrength: number) => {
       let treeN = Math.min(
         PLANT_CAP.trees,
         Math.max(0, Math.ceil(s.shrubs / 450) + Math.ceil(s.grass / 4000)),
       );
       let shrubN = Math.min(PLANT_CAP.shrubs, Math.max(0, Math.ceil(s.shrubs / 360)));
       let grassN = Math.min(PLANT_CAP.grass, Math.max(0, Math.ceil(s.grass / 500)));
-      if (s.fire) {
-        treeN = Math.max(0, Math.floor(treeN * 0.55));
-        shrubN = Math.max(0, Math.floor(shrubN * 0.5));
-        grassN = Math.max(0, Math.floor(grassN * 0.45));
+      if (fireStrength > 0) {
+        treeN = Math.max(0, Math.floor(treeN * (1 - fireStrength * 0.45)));
+        shrubN = Math.max(0, Math.floor(shrubN * (1 - fireStrength * 0.5)));
+        grassN = Math.max(0, Math.floor(grassN * (1 - fireStrength * 0.55)));
       }
       return { treeN, shrubN, grassN };
-    };
-
-    const groundColors = (season: EcosystemState['season'], fire: boolean) => {
-      if (fire) return { far: '#8d6e63', near: '#a1887f', carpet: null as string | null };
-      switch (season) {
-        case 'winter':
-          return { far: '#90a4ae', near: '#eceff1', carpet: 'rgba(255,255,255,0.35)' };
-        case 'autumn':
-          return { far: '#a1887f', near: '#d7ccc8', carpet: 'rgba(255,152,0,0.12)' };
-        case 'summer':
-          return { far: '#66bb6a', near: '#9ccc65', carpet: 'rgba(129,199,132,0.2)' };
-        default:
-          return { far: '#81c784', near: '#aed581', carpet: 'rgba(165,214,167,0.18)' };
-      }
     };
 
     const paint = (now: number) => {
@@ -629,9 +694,21 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
       const delta = Math.min(0.1, Math.max(0, (now - previousNow) / 1000));
       previousNow = now;
       const s = stateRef.current;
-      const motionDelta = !s.paused && !motionQuery.matches && !document.hidden ? delta : 0;
+      const reducedMotion = motionQuery.matches;
+      const motionDelta = !s.paused && !reducedMotion && !document.hidden ? delta : 0;
       animationSeconds += motionDelta;
       stepWildlife(wildlife, motionDelta, s);
+      if (reducedMotion) {
+        // Deliberate commands still need to be visible when the user asks for
+        // reduced motion; only the interpolation itself is removed.
+        visualSeason = seasonPosition(s.season);
+        visualRain = s.rainfall;
+        visualFire = s.fire ? 1 : 0;
+      } else {
+        visualSeason = advanceSeasonVisual(visualSeason, s.season, motionDelta);
+        visualRain = approachVisual(visualRain, s.rainfall, motionDelta, 2.8);
+        visualFire = approachVisual(visualFire, s.fire ? 1 : 0, motionDelta, 4.8);
+      }
       if (wildlife.observation.text !== lastObservation) {
         lastObservation = wildlife.observation.text;
         observationRef.current({ ...wildlife.observation });
@@ -647,25 +724,29 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
       }
 
       const hasSceneArt = Object.keys(sceneImages).length > 0;
-      const skies: Record<string, [string, string]> = {
-        spring: ['#b3e5fc', '#e8f5e9'],
-        summer: ['#4fc3f7', '#fff59d'],
-        autumn: ['#ffcc80', '#ffe0b2'],
-        winter: ['#90caf9', '#eceff1'],
-      };
-      const [c1, c2] = skies[s.season];
+      const palette = seasonPaletteAt(visualSeason);
+      const rainOvercast = Math.max(0, Math.min(1, (visualRain - 0.45) / 0.55));
+      const seasonCyclePosition = ((visualSeason % 4) + 4) % 4;
+      const vegetationFilter = visualFire > 0.001
+        ? `brightness(${1 - visualFire * 0.45}) sepia(${visualFire * 0.55}) saturate(${1 + visualFire * 0.2})`
+        : palette.snow > 0.02
+          ? `brightness(${1 + palette.snow * 0.08}) saturate(${1 - palette.snow * 0.5})`
+          : seasonCyclePosition > 1.8 && seasonCyclePosition < 2.8
+            ? 'sepia(0.3) hue-rotate(-18deg) saturate(1.15)'
+            : seasonCyclePosition > 0.8 && seasonCyclePosition < 1.8
+              ? 'brightness(1.06) saturate(1.15)'
+              : 'none';
       const g = ctx.createLinearGradient(0, 0, 0, h);
-      g.addColorStop(0, c1);
-      g.addColorStop(1, c2);
+      g.addColorStop(0, rgba(palette.skyTop));
+      g.addColorStop(1, rgba(palette.skyBottom));
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, w, h);
       drawSceneLayer(ctx, 'sky', w, h);
-      drawSkyMotion(ctx, w, h, elapsed, s.rainfall > 0.55);
+      drawSkyMotion(ctx, w, h, elapsed, rainOvercast);
 
       // —— 远山 ——
-      const mt = groundColors(s.season, s.fire);
       if (!sceneImages.mountains) {
-        ctx.fillStyle = s.season === 'winter' ? '#78909c' : '#7e57c2';
+        ctx.fillStyle = rgba(palette.far);
         ctx.globalAlpha = 0.35;
         ctx.beginPath();
         ctx.moveTo(0, h * 0.42);
@@ -681,8 +762,8 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
         ctx.globalAlpha = 1;
 
         // 雪顶
-        if (s.season === 'winter' || s.temperature < 5) {
-          ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        if (palette.snow > 0.02) {
+          ctx.fillStyle = `rgba(255,255,255,${0.85 * palette.snow})`;
           ctx.beginPath();
           ctx.moveTo(w * 0.45, h * 0.16);
           ctx.lineTo(w * 0.48, h * 0.22);
@@ -699,7 +780,7 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
 
       if (!sceneImages.meadow) {
         // 中景山丘
-        ctx.fillStyle = mt.far;
+        ctx.fillStyle = rgba(palette.far);
         ctx.beginPath();
         ctx.moveTo(0, h * 0.48);
         ctx.lineTo(w * 0.2, h * 0.32);
@@ -712,16 +793,16 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
         ctx.fill();
 
         // 近景草地
-        ctx.fillStyle = mt.near;
+        ctx.fillStyle = rgba(palette.near);
         ctx.fillRect(0, h * 0.55, w, h * 0.45);
-        if (mt.carpet) {
-          ctx.fillStyle = mt.carpet;
+        if (palette.carpetAlpha > 0.001) {
+          ctx.fillStyle = rgba(palette.carpet, palette.carpetAlpha * (1 - visualFire * 0.75));
           ctx.fillRect(0, h * 0.58, w, h * 0.42);
         }
 
-        if (!s.fire && s.grass > 2500) {
-          const carpet = Math.min(0.28, (s.grass - 2500) / 10000);
-          ctx.fillStyle = `rgba(102, 187, 106, ${carpet})`;
+        if (visualFire < 0.99 && s.grass > 2500) {
+          const carpet = Math.min(0.28, (s.grass - 2500) / 10000) * (1 - visualFire * 0.8);
+          ctx.fillStyle = rgba(palette.carpet, carpet);
           ctx.fillRect(0, h * 0.58, w, h * 0.42);
         }
 
@@ -781,9 +862,24 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
           drawSceneLayer(ctx, key, w, h);
         }
       }
+      // Keep generated layers and procedural fallbacks in the same seasonal
+      // atmosphere. The strength is continuous, so a forced season reads as
+      // a slow change in light instead of a hard palette cut.
+      if (palette.tintAlpha > 0.001 || visualFire > 0.001) {
+        ctx.save();
+        ctx.fillStyle = rgba(palette.tint);
+        ctx.globalAlpha = palette.tintAlpha;
+        ctx.fillRect(0, 0, w, h * 0.86);
+        if (visualFire > 0.001) {
+          ctx.fillStyle = '#5d4037';
+          ctx.globalAlpha = visualFire * 0.16;
+          ctx.fillRect(0, h * 0.42, w, h * 0.58);
+        }
+        ctx.restore();
+      }
       drawWaterMotion(ctx, w, h, elapsed);
 
-      const { treeN, shrubN, grassN } = plantCounts(s);
+      const { treeN, shrubN, grassN } = plantCounts(s, visualFire);
       const hasTrees = plants.trees.length > 0;
       const hasShrubs = plants.shrubs.length > 0;
       const hasGrass = plants.grass.length > 0;
@@ -795,15 +891,7 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
 
 
       ctx.save();
-      if (s.fire) {
-        ctx.filter = 'brightness(0.55) sepia(0.55) saturate(1.2)';
-      } else if (s.season === 'winter') {
-        ctx.filter = 'brightness(1.08) saturate(0.5)';
-      } else if (s.season === 'autumn') {
-        ctx.filter = 'sepia(0.3) hue-rotate(-18deg) saturate(1.15)';
-      } else if (s.season === 'summer') {
-        ctx.filter = 'brightness(1.06) saturate(1.15)';
-      }
+      ctx.filter = vegetationFilter;
 
       if (!hasGeneratedTrees) for (let i = 0; i < treeN; i++) {
         const tx = 24 + seeded(i, 41) * (w - 48);
@@ -813,7 +901,7 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
           const img = plants.trees[i % plants.trees.length]!;
           drawSprite(ctx, img, tx, ty, size, seeded(i, 44) > 0.5, Math.sin(elapsed * 0.65 + i) * 0.018);
         } else {
-          drawPlantBlob(tx, ty - size * 0.3, size * 0.35, s.fire ? '#a1887f' : '#43a047');
+          drawPlantBlob(tx, ty - size * 0.3, size * 0.35, rgba(palette.near));
         }
       }
 
@@ -825,7 +913,7 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
           const img = plants.shrubs[i % plants.shrubs.length]!;
           drawSprite(ctx, img, sx, sy, size, seeded(i, 54) > 0.5, Math.sin(elapsed * 0.9 + i * 0.7) * 0.024);
         } else {
-          drawPlantBlob(sx, sy - 8, 14 + (i % 3) * 3, s.fire ? '#a1887f' : '#66bb6a');
+          drawPlantBlob(sx, sy - 8, 14 + (i % 3) * 3, rgba(palette.carpet));
         }
         // 少量河岸柳提示
         if (i < 4) {
@@ -850,7 +938,7 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
           const img = plants.grass[i % plants.grass.length]!;
           drawSprite(ctx, img, gx, gy, size, seeded(i, 64) > 0.5, Math.sin(elapsed * 1.2 + i * 0.5) * 0.035);
         } else {
-          ctx.fillStyle = s.season === 'winter' ? '#b0bec5' : '#7cb342';
+          ctx.fillStyle = palette.snow > 0.2 ? rgba(palette.near) : rgba(palette.carpet);
           ctx.fillRect(gx, gy - 10, 2, 8 + seeded(i, 33) * 6);
         }
       }
@@ -859,7 +947,10 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
 
       const hits: CritterHit[] = [];
       const foliage = prepareFoliage(w, h, elapsed);
+      ctx.save();
+      ctx.filter = vegetationFilter;
       for (const prop of foliage) drawFoliage(ctx, prop);
+      ctx.restore();
       // Reuse one small offscreen surface. Leaf alpha masks reveal each animal
       // continuously as it walks past the shelter, instead of flipping a whole
       // sprite from in front to behind when its feet cross a sorting line.
@@ -907,6 +998,7 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
               animalCtx.rect(left, top, bufferW, Math.max(0, maskBottom - top));
               animalCtx.clip();
             }
+            animalCtx.filter = vegetationFilter;
             drawFoliage(animalCtx, prop);
             animalCtx.restore();
           }
@@ -925,6 +1017,21 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
         lastUiUpdate = now;
         const selected = hits.find((hit) => hit.agent.id === selectedRef.current);
         if (selectedRef.current) setTooltip(selected ? tooltipFor(selected) : null);
+        if (statusRef.current) {
+          const byKind = new Map<WildlifeKind, WildlifeAgent>();
+          for (const agent of wildlife.agents) {
+            const previous = byKind.get(agent.kind);
+            if (!previous || statusPriority[agent.activity] > statusPriority[previous.activity]) byKind.set(agent.kind, agent);
+          }
+          statusRef.current((['wolf', 'deer', 'rabbit'] as WildlifeKind[]).map((kind) => {
+            const agent = byKind.get(kind);
+            return {
+              kind,
+              activity: agent?.activity ?? 'rest',
+              moving: agent ? Math.hypot(agent.vx, agent.vy * 0.5625) > 0.002 : false,
+            };
+          }));
+        }
         // Development-only telemetry supports reproducible movement checks;
         // no diagnostics or implementation details enter the visitor UI.
         if (import.meta.env.DEV) {
@@ -936,45 +1043,104 @@ export function EcoSceneCanvas({ state, onObservation }: Props) {
               clouds: CLOUDS.map((_, index) => cloudPosition(index, elapsed)),
               fish: (waterMask ? fishRoutes : FALLBACK_FISH_ROUTES).map((route) => ({ ...fishPosition(route, elapsed), size: route.size })),
               time: elapsed,
+              visualSeason,
+              visualRain,
+              visualFire,
+              rainStrength: Math.max(0, Math.min(1, (visualRain - 0.45) / 0.55)),
+              snowStrength: palette.snow,
             },
             poses: [...visualPoses.entries()].map(([id, pose]) => ({ id, action: pose.action, blend: pose.blend, frame: pose.frame })),
             agents: wildlife.agents.map(({ id, kind, x, y, vx, vy, facing, activity, gait, opacity, cover }) => ({ id, kind, x, y, vx, vy, facing, activity, gait, opacity, cover })),
+            statuses: (['wolf', 'deer', 'rabbit'] as WildlifeKind[]).map((kind) => {
+              const agent = wildlife.agents.find((candidate) => candidate.kind === kind);
+              return { kind, label: WILDLIFE_LABELS[kind], activity: agent?.activity ?? 'rest' };
+            }),
           });
         }
       }
 
-      if (s.fire) {
-        ctx.fillStyle = 'rgba(255,87,34,0.28)';
-        ctx.fillRect(0, 0, w, h);
-        ctx.font = '28px serif';
-        for (let i = 0; i < 5; i++) {
-          ctx.fillText('🔥', 60 + i * 70, h * 0.5 + (i % 2) * 20);
+      if (visualFire > 0.001) {
+        // A low translucent ember bed plus tapered flame shapes reads as a
+        // fire front while still allowing the illustrated scene to remain
+        // visible underneath. Both layers fade with the same visual state.
+        ctx.save();
+        ctx.globalAlpha = visualFire * 0.24;
+        const heat = ctx.createLinearGradient(0, h * 0.5, 0, h);
+        heat.addColorStop(0, 'rgba(255,112,55,0)');
+        heat.addColorStop(1, 'rgba(255,78,32,0.9)');
+        ctx.fillStyle = heat;
+        ctx.fillRect(0, h * 0.48, w, h * 0.52);
+        for (let i = 0; i < 9; i++) {
+          const baseX = w * (0.09 + seeded(i, 301) * 0.82);
+          const baseY = h * (0.76 + seeded(i, 302) * 0.16);
+          const flameH = h * (0.08 + seeded(i, 303) * 0.11) * Math.max(0.55, visualFire);
+          const sway = Math.sin(elapsed * (3.4 + seeded(i, 304) * 1.8) + i) * w * 0.009;
+          ctx.globalAlpha = visualFire * (0.48 + seeded(i, 305) * 0.3);
+          ctx.fillStyle = i % 2 ? '#e85d2a' : '#f59e43';
+          ctx.beginPath();
+          ctx.moveTo(baseX - w * 0.012, baseY);
+          ctx.quadraticCurveTo(baseX - w * 0.026, baseY - flameH * 0.42, baseX + sway, baseY - flameH);
+          ctx.quadraticCurveTo(baseX + w * 0.023, baseY - flameH * 0.47, baseX + w * 0.012, baseY);
+          ctx.fill();
+          ctx.globalAlpha = visualFire * 0.58;
+          ctx.fillStyle = '#ffe2a1';
+          ctx.beginPath();
+          ctx.ellipse(baseX + sway * 0.4, baseY - flameH * 0.27, w * 0.006, flameH * 0.2, 0, 0, Math.PI * 2);
+          ctx.fill();
         }
+        ctx.globalAlpha = visualFire * 0.5;
+        ctx.fillStyle = '#f6b34a';
+        for (let i = 0; i < 12; i++) {
+          const ex = w * (0.08 + seeded(i, 306) * 0.84);
+          const ey = h * (0.64 + seeded(i, 307) * 0.27) - elapsed * (4 + i % 4);
+          ctx.beginPath();
+          ctx.arc(ex, ey % (h * 0.34) + h * 0.52, 1.1 + (i % 3) * 0.55, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        // Smoke rises slowly and bends with the same paused clock.
+        ctx.globalAlpha = visualFire * 0.12;
+        ctx.fillStyle = '#5d514b';
+        for (let i = 0; i < 4; i++) {
+          const sx = w * (0.2 + i * 0.2) + Math.sin(elapsed * 0.4 + i) * w * 0.02;
+          const sy = h * (0.58 - i * 0.07);
+          ctx.beginPath();
+          ctx.ellipse(sx, sy, w * (0.035 + i * 0.008), h * (0.022 + i * 0.006), 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
       }
 
-      if (s.rainfall > 0.55) {
-        ctx.strokeStyle = 'rgba(100,180,255,0.5)';
-        ctx.lineWidth = 1;
-        for (let i = 0; i < 30; i++) {
-          const rx = (i * 37 + s.tick * 3) % w;
-          const ry = (i * 53 + s.tick * 5) % (h * 0.55);
+      const rainStrength = Math.max(0, Math.min(1, (visualRain - 0.45) / 0.55));
+      if (rainStrength > 0.005) {
+        ctx.save();
+        ctx.strokeStyle = `rgba(100,180,255,${0.12 + rainStrength * 0.42})`;
+        ctx.lineWidth = Math.max(0.7, 0.8 + rainStrength * 0.5);
+        const drops = Math.round(8 + rainStrength * 64);
+        for (let i = 0; i < drops; i++) {
+          const rx = (seeded(i, 321) * w + elapsed * (38 + (i % 7) * 8)) % w;
+          const ry = (seeded(i, 322) * h * 0.62 + elapsed * (62 + (i % 5) * 10)) % (h * 0.7);
+          const length = 4 + rainStrength * 8;
           ctx.beginPath();
           ctx.moveTo(rx, ry);
-          ctx.lineTo(rx + 2, ry + 8);
+          ctx.lineTo(rx - 1.5, ry + length);
           ctx.stroke();
         }
+        ctx.restore();
       }
 
-      // 冬雪粒子
-      if (s.season === 'winter') {
-        ctx.fillStyle = 'rgba(255,255,255,0.85)';
-        for (let i = 0; i < 40; i++) {
-          const sx = (seeded(i, 200) * w + elapsed * (12 + (i % 5))) % w;
+      // 冬雪粒子也随季节调色值渐入渐出，而不是等到 season 字符串变更才出现。
+      if (palette.snow > 0.005) {
+        ctx.save();
+        ctx.fillStyle = `rgba(255,255,255,${0.2 + palette.snow * 0.65})`;
+        const flakes = Math.round(8 + palette.snow * 40);
+        for (let i = 0; i < flakes; i++) {
+          const sx = (seeded(i, 200) * w + elapsed * (8 + (i % 5) * 2) + Math.sin(elapsed * 0.6 + i) * 5) % w;
           const sy = (seeded(i, 201) * h + elapsed * (20 + (i % 7)) * 8) % h;
           ctx.beginPath();
           ctx.arc(sx, sy, 1.2 + (i % 3) * 0.4, 0, Math.PI * 2);
           ctx.fill();
         }
+        ctx.restore();
       }
 
       raf = requestAnimationFrame(paint);
