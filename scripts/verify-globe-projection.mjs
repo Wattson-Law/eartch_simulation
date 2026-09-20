@@ -12,6 +12,26 @@ const { outputText } = ts.transpileModule(source, {
 });
 const { TAU, YELLOWSTONE, VIEW_LATITUDE, wrapAngle, projectLocation, createGlobeLookup, renderGlobeTexture } =
   await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
+const spaceSource = await readFile(new URL('../src/ui/spaceBackdrop.ts', import.meta.url), 'utf8');
+const spaceOutput = ts.transpileModule(spaceSource, {
+  compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022, verbatimModuleSyntax: true },
+}).outputText;
+const { SPACE_STAR_COUNT, SPACE_STAR_LAYERS, spaceStarPosition } =
+  await import(`data:text/javascript;base64,${Buffer.from(spaceOutput).toString('base64')}`);
+
+assert.equal(SPACE_STAR_LAYERS.length, 3, 'Space must retain separate far, middle, and near star layers');
+assert.ok(SPACE_STAR_COUNT >= 120, 'Space backdrop needs enough stars to read at mobile and desktop sizes');
+for (const layer of SPACE_STAR_LAYERS) for (const star of layer.stars) {
+  assert.ok(star.x >= 0 && star.x < 1 && star.y >= 0 && star.y < 1, 'Generated stars must remain normalized');
+  assert.ok(star.radius > 0 && star.alpha > 0 && star.alpha <= 1, 'Generated stars need visible bounded styling');
+  const position = spaceStarPosition(star, layer, 120, -2.3);
+  assert.ok(position.x >= 0 && position.x < 1 && position.y >= 0 && position.y < 1, 'Moving stars must wrap inside the viewport');
+}
+const parallaxStar = SPACE_STAR_LAYERS[2].stars[0];
+const parallaxLayer = SPACE_STAR_LAYERS[2];
+const parallaxA = spaceStarPosition(parallaxStar, parallaxLayer, 0, 0);
+const parallaxB = spaceStarPosition(parallaxStar, parallaxLayer, 0, 0.5);
+assert.notEqual(parallaxA.x, parallaxB.x, 'Near stars must respond to globe longitude with parallax');
 
 assert.ok(Math.abs(wrapAngle(TAU)) < 1e-12, 'Full turns should wrap to zero');
 assert.ok(Math.abs(wrapAngle(-TAU)) < 1e-12, 'Negative full turns should wrap to zero');
@@ -89,4 +109,4 @@ let seamDifference = 0;
 for (let i = 0; i < seamLeft.length; i++) seamDifference = Math.max(seamDifference, Math.abs(seamLeft[i] - seamRight[i]));
 assert.ok(seamDifference <= 2, 'Raster output should remain continuous across the wrapped texture seam');
 
-console.log('globe projection verification passed: projection landmarks, wrapped sampling, shading, and antialiased bounds');
+console.log(`globe projection verification passed: projection landmarks, wrapped sampling, ${SPACE_STAR_COUNT} layered stars, shading, and antialiased bounds`);

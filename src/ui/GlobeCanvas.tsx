@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { assetUrl, loadEcosystemManifest, loadImage } from '../assetsPaths';
+import { assetUrl, loadImage } from '../assetsPaths';
 import { createGlobeLookup, projectLocation, renderGlobeTexture, TAU, wrapAngle, YELLOWSTONE } from './globeProjection';
+import { drawSpaceBackdrop, SPACE_STAR_COUNT, SPACE_STAR_LAYERS } from './spaceBackdrop';
 
 interface Props { onEnterYellowstone: () => void }
 interface GlobeControls { toggle: () => void; locate: () => void }
@@ -62,7 +63,6 @@ export function GlobeCanvas({ onEnterYellowstone }: Props) {
     let textureSource = 'painted-fallback';
     let lastRenderedLongitude = NaN;
     let drag: { id: number; startX: number; startY: number; lastX: number; lastAt: number; moved: boolean; startedOnHotspot: boolean } | null = null;
-    const scenery: { sky?: HTMLImageElement; cloud?: HTMLImageElement } = {};
     const mapCanvas = document.createElement('canvas');
     mapCanvas.width = TEXTURE_WIDTH; mapCanvas.height = TEXTURE_HEIGHT;
     const mapCtx = mapCanvas.getContext('2d', { willReadFrequently: true })!;
@@ -103,13 +103,6 @@ export function GlobeCanvas({ onEnterYellowstone }: Props) {
       lastRenderedLongitude = NaN;
     };
     void loadImage(assetUrl('assets/ecosystem-v1/earth/map.png')).then(installTexture).catch(() => { /* keep painted fallback */ });
-    void loadEcosystemManifest().then(manifest => {
-      if (disposed) return;
-      const sky = manifest?.scene?.layers.sky?.src;
-      const cloud = manifest?.props?.cloud?.src;
-      if (sky) void loadImage(sky).then(image => { if (!disposed) scenery.sky = image; }).catch(() => {});
-      if (cloud) void loadImage(cloud).then(image => { if (!disposed) scenery.cloud = image; }).catch(() => {});
-    });
 
     const hotspot = () => {
       const point = projectLocation(YELLOWSTONE.longitude, YELLOWSTONE.latitude, longitude);
@@ -134,20 +127,6 @@ export function GlobeCanvas({ onEnterYellowstone }: Props) {
     };
     controlsRef.current = { toggle, locate };
 
-    const drawCloud = (x: number, y: number, size: number, opacity: number) => {
-      ctx.save(); ctx.globalAlpha = opacity;
-      if (scenery.cloud) {
-        const image = scenery.cloud;
-        const h = size * image.naturalHeight / image.naturalWidth;
-        ctx.drawImage(image, x - size / 2, y - h / 2, size, h);
-      } else {
-        ctx.fillStyle = '#fff8e5'; ctx.strokeStyle = '#6a8580'; ctx.lineWidth = 1.2;
-        ctx.beginPath(); ctx.ellipse(x, y, size * 0.48, size * 0.14, 0, 0, TAU); ctx.fill(); ctx.stroke();
-        ctx.beginPath(); ctx.ellipse(x - size * 0.08, y - size * 0.06, size * 0.25, size * 0.15, 0, 0, TAU); ctx.fill();
-      }
-      ctx.restore();
-    };
-
     const draw = (now: number) => {
       if (disposed) return;
       const delta = document.hidden ? 0 : Math.min(0.05, Math.max(0, (now - previousNow) / 1000));
@@ -167,29 +146,22 @@ export function GlobeCanvas({ onEnterYellowstone }: Props) {
       if (spinning && !drag) time += delta;
       if (width && height) {
         ctx.clearRect(0, 0, width, height);
-        // Only the upper sky is standalone artwork; its lower edge belongs behind mountains.
-        if (scenery.sky) ctx.drawImage(scenery.sky, 0, 0, scenery.sky.naturalWidth, scenery.sky.naturalHeight * .3, 0, 0, width, height);
-        else {
-          const wash = ctx.createLinearGradient(0, 0, 0, height);
-          wash.addColorStop(0, '#bce3df'); wash.addColorStop(1, '#f5f0d9');
-          ctx.fillStyle = wash; ctx.fillRect(0, 0, width, height);
-        }
-        const paperWash = ctx.createLinearGradient(0, 0, 0, height);
-        paperWash.addColorStop(0, 'rgba(250,247,228,0.26)');
-        paperWash.addColorStop(1, 'rgba(245,243,216,0.84)');
-        ctx.fillStyle = paperWash; ctx.fillRect(0, 0, width, height);
-        const sunX = width * 0.82, sunY = height * 0.17, sunRadius = Math.min(25, width * 0.055);
-        const halo = ctx.createRadialGradient(sunX, sunY, sunRadius * 0.4, sunX, sunY, sunRadius * 2.4);
-        halo.addColorStop(0, 'rgba(255,221,135,.4)'); halo.addColorStop(1, 'rgba(255,221,135,0)');
-        ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(sunX, sunY, sunRadius * 2.4, 0, TAU); ctx.fill();
-        ctx.fillStyle = '#f7d98e'; ctx.strokeStyle = '#c49d61'; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.arc(sunX, sunY, sunRadius, 0, TAU); ctx.fill(); ctx.stroke();
-        drawCloud(width * 0.17 + Math.sin(time * .045) * width * .06, height * .24, Math.min(170, width * .24), .86);
-        drawCloud(width * .83 - Math.sin(time * .036) * width * .06, height * .7, Math.min(200, width * .26), .8);
+        drawSpaceBackdrop(ctx, width, height, time, longitude);
 
-        ctx.fillStyle = 'rgba(57,94,80,0.08)';
-        ctx.beginPath(); ctx.ellipse(cx, cy + radius * 1.1, radius * .66, radius * .065, 0, 0, TAU); ctx.fill();
-        ctx.strokeStyle = 'rgba(250,250,233,0.64)'; ctx.lineWidth = 9;
+        const atmosphere = ctx.createRadialGradient(cx - radius * .18, cy - radius * .2, radius * .82, cx, cy, radius * 1.16);
+        atmosphere.addColorStop(0, 'rgba(94, 194, 216, 0)');
+        atmosphere.addColorStop(.83, 'rgba(103, 208, 224, 0.04)');
+        atmosphere.addColorStop(1, 'rgba(105, 200, 222, 0.22)');
+        ctx.fillStyle = atmosphere;
+        ctx.beginPath(); ctx.arc(cx, cy, radius * 1.16, 0, TAU); ctx.fill();
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(-0.18);
+        ctx.strokeStyle = 'rgba(185, 217, 225, 0.11)';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.ellipse(0, 0, radius * 1.34, radius * .4, 0, 0, TAU); ctx.stroke();
+        ctx.restore();
+        ctx.strokeStyle = 'rgba(178, 227, 230, 0.38)'; ctx.lineWidth = 7;
         ctx.beginPath(); ctx.arc(cx, cy, radius + 6, 0, TAU); ctx.stroke();
         if (!Number.isFinite(lastRenderedLongitude) || Math.abs(longitude - lastRenderedLongitude) > 0.000001) {
           renderGlobeTexture(pixels.data, texture, lookup, longitude);
@@ -217,7 +189,7 @@ export function GlobeCanvas({ onEnterYellowstone }: Props) {
         const degrees = Math.round(longitude * 180 / Math.PI);
         canvas.setAttribute('aria-valuenow', String(degrees));
         canvas.setAttribute('aria-valuetext', `朝向${Math.abs(degrees)}度${degrees < 0 ? '西经' : '东经'}`);
-        if (import.meta.env.DEV) canvas.dataset.globe = JSON.stringify({ longitude, velocity, time, spinning, dragging: !!drag, targeting: target !== null, source: textureSource, hotspot: hot, radius, cx, cy, renderSize: lookup.size });
+        if (import.meta.env.DEV) canvas.dataset.globe = JSON.stringify({ longitude, velocity, time, spinning, dragging: !!drag, targeting: target !== null, source: textureSource, backdrop: 'layered-space', spaceLayers: SPACE_STAR_LAYERS.length, stars: SPACE_STAR_COUNT, hotspot: hot, radius, cx, cy, renderSize: lookup.size });
       }
       raf = requestAnimationFrame(draw);
     };

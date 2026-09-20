@@ -86,13 +86,14 @@
   display: flex;
   flex-direction: column;
   min-height: 480px;
-  background: #eff1dd;
+  background: #081225;
 }
 
 .globe-heading {
   padding: 18px 16px 10px;
   text-align: center;
-  background: #cde8df;
+  background: linear-gradient(180deg, #132440 0%, #0d1930 100%);
+  border-bottom: 1px solid rgba(167, 207, 215, 0.12);
 }
 
 .globe-eyebrow {
@@ -100,7 +101,7 @@
   line-height: 1.3;
   font-size: 0.62rem;
   letter-spacing: 0.23em;
-  color: #688875;
+  color: #86b8c3;
 }
 
 .globe-heading h2 {
@@ -108,20 +109,22 @@
   font-size: clamp(1.2rem, 2.4vw, 1.65rem);
   font-weight: 650;
   letter-spacing: 0.05em;
-  color: #34524d;
+  color: #f5f0dc;
   line-height: 1.35;
 }
 
 .globe-heading p {
   margin: 0;
   font-size: 0.76rem;
-  color: #657e70;
+  color: #adbfca;
 }
 
 .globe-canvas {
-  flex: 0 0 auto;
+  flex: 1 1 285px;
   width: 100%;
-  height: clamp(285px, calc(100svh - 365px), 440px);
+  height: auto;
+  min-height: 285px;
+  max-height: 620px;
   display: block;
   touch-action: pan-y;
   outline-offset: -5px;
@@ -137,13 +140,13 @@
   text-align: center;
   font-size: 0.76rem;
   line-height: 1.7;
-  color: #667b66;
+  color: #bac8cd;
 }
 
 .globe-keyboard-hint {
   display: block;
   font-size: 0.64rem;
-  color: #81917a;
+  color: #8299a5;
 }
 
 .globe-controls {
@@ -154,9 +157,9 @@
 }
 
 .globe-control {
-  border: 1px solid #b2c1a1;
-  background: #f7f6e8;
-  color: #52664b;
+  border: 1px solid #466279;
+  background: #142740;
+  color: #d8e3df;
   border-radius: 999px;
   padding: 10px 14px;
   min-height: 42px;
@@ -165,12 +168,12 @@
   cursor: pointer;
 }
 
-.globe-control:hover { background: #e6ecd5; }
-.globe-control[aria-pressed="true"] { background: #e0e9d1; }
+.globe-control:hover { background: #1e3855; }
+.globe-control[aria-pressed="true"] { background: #253f55; }
 
 .globe-controls .enter-btn {
-  background: #ba7947;
-  box-shadow: 0 3px 0 #a66c40;
+  background: #b87343;
+  box-shadow: 0 3px 0 #8f5433;
   color: #fff8e6;
   font-size: 0.8rem;
 }
