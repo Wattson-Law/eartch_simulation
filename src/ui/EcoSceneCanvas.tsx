@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type WheelEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react';
 import type { EcosystemState } from '../sim/types';
 import {
   createWildlifeWorld,
@@ -6,6 +6,9 @@ import {
   WILDLIFE_COVER_PATCHES,
   WILDLIFE_ACTIVITY_LABELS,
   WILDLIFE_LABELS,
+  riverProfileAt,
+  riverBankVariation,
+  riverBankCove,
   type WildlifeAgent,
   type WildlifeKind,
   type WildlifeActivity,
@@ -175,38 +178,6 @@ function drawMirroredPanoramaLayer(
   }
   ctx.restore();
   return true;
-}
-
-function riverProfileAt(unitX: number) {
-  // A broad, unequal S curve gives the valley a real downstream route. The
-  // two low-frequency bends are shared by the banks, highlights and fish, so
-  // every camera position sees the same river instead of a mirrored copy.
-  const primaryBend = Math.sin(unitX * Math.PI * 2.15 + 0.55) * 0.085;
-  const secondaryBend = Math.sin(unitX * Math.PI * 4.4 - 0.25) * 0.02;
-  const recedingTurn = -Math.exp(-Math.pow((unitX - 0.47) / 0.18, 2)) * 0.07;
-  // A short floodplain bend near the middle of the panorama widens the
-  // channel before it narrows again. The slow envelope keeps the change
-  // organic instead of making the river read as two parallel rails.
-  const floodplainBend = Math.exp(-Math.pow((unitX - 0.53) / 0.095, 2)) * 0.028;
-  const center = 0.79 + primaryBend + secondaryBend + recedingTurn;
-  const halfWidth = 0.017 + Math.max(0, center - 0.68) * 0.12 + floodplainBend;
-  return { center, halfWidth };
-}
-
-function riverBankVariation(unitX: number) {
-  // Low-frequency bank movement reads as shallow coves and gravel shelves;
-  // keeping it deterministic keeps the river, highlights, and fish aligned.
-  return (
-    Math.sin(unitX * Math.PI * 5.6 + 0.8) * 0.32 +
-    Math.sin(unitX * Math.PI * 9.2) * 0.12
-  );
-}
-
-function riverBankCove(unitX: number) {
-  return (
-    Math.sin(unitX * Math.PI * 3.15 - 0.65) * 0.014 +
-    Math.sin(unitX * Math.PI * 7.4 + 0.25) * 0.005
-  );
 }
 
 function traceRiverRibbon(ctx: CanvasRenderingContext2D, w: number, h: number, widthScale = 1) {
@@ -900,6 +871,29 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas) return;
+
+    // React delegates wheel events through a passive listener in some
+    // browsers. The panorama needs to consume horizontal wheel intent, so
+    // register this one handler natively with passive:false instead of
+    // calling preventDefault from the synthetic event.
+    const handleWheel = (event: globalThis.WheelEvent) => {
+      const horizontalDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+      if (Math.abs(horizontalDelta) < 0.5) return;
+      event.preventDefault();
+      const width = canvas.getBoundingClientRect().width;
+      const maxCamera = Math.max(0, width * (WORLD_WIDTH_FACTOR - 1));
+      const nextCamera = Math.max(0, Math.min(maxCamera, cameraRef.current + horizontalDelta));
+      cameraRef.current = nextCamera;
+      setCameraProgress(nextCamera / Math.max(1, maxCamera));
+    };
+
+    canvas.addEventListener('wheel', handleWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', handleWheel);
+  }, []);
+
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
@@ -1156,7 +1150,12 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
       const { kind, activity } = agent;
       const moving = Math.hypot(agent.vx, agent.vy * 0.5625) > 0.002;
       const running = activity === 'chase' || activity === 'flee';
-      const action: EcosystemAction = moving || running
+      // Hiding, feeding and the brief pounce settle the body instead of
+      // replaying a full locomotion clip. Only chase/flee gets a running
+      // silhouette; ambient travel stays a slow walk or hop.
+      const concealed = activity === 'hide' || activity === 'pounce' || activity === 'feed';
+      const visualMoving = moving && !concealed;
+      const action: EcosystemAction = visualMoving || running
         ? running ? 'run' : kind === 'rabbit' ? 'hop' : 'walk'
         : kind === 'deer' && (activity === 'graze' || activity === 'drink') ? 'graze'
         : kind === 'rabbit' && activity === 'alert' ? 'alert'
@@ -1165,7 +1164,7 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
       if (!current.img) return false;
       let pose = visualPoses.get(agent.id);
       if (!pose) {
-        pose = { action, previousAction: action, frame: 0, previousFrame: 0, actionTime: agent.phase % 1.5, blend: 1, movement: moving ? 1 : 0, facing: agent.facing, oldFacing: agent.facing, turnTime: 1 };
+        pose = { action, previousAction: action, frame: 0, previousFrame: 0, actionTime: agent.phase % 1.5, blend: 1, movement: visualMoving ? 1 : 0, facing: agent.facing, oldFacing: agent.facing, turnTime: 1 };
         visualPoses.set(agent.id, pose);
       }
       if (pose.action !== action) {
@@ -1182,7 +1181,7 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
       }
       pose.actionTime += delta;
       pose.blend = Math.min(1, pose.blend + delta / 0.22);
-      pose.movement += ((moving ? 1 : 0) - pose.movement) * (1 - Math.exp(-delta * 12));
+      pose.movement += ((visualMoving ? 1 : 0) - pose.movement) * (1 - Math.exp(-delta * 12));
       pose.turnTime = Math.min(1, pose.turnTime + delta / 0.32);
       const facing = pose.turnTime < 0.58 ? pose.oldFacing : pose.facing;
       // Keep the body readable while it arcs through a turn. A small heading
@@ -1199,15 +1198,15 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
       const headingLean = Math.max(-0.14, Math.min(0.14, Math.sin(travelAngle) * 0.11)) * pose.movement;
       const shoulderTurn = Math.max(-0.08, Math.min(0.08, Math.sin(headingDelta(agent.heading, agent.targetHeading)) * 0.06));
       // Distance drives feet; stationary gestures have an independent clock.
-      pose.frame = moving || running ? agent.gait * current.meta.frames : pose.actionTime * (current.meta.fps ?? 6);
+      pose.frame = visualMoving || running ? agent.gait * current.meta.frames : pose.actionTime * (current.meta.fps ?? 6);
       const depth = 0.84 + (agent.y - 0.61) * 0.8;
       const desiredHeight = FRAME_HEIGHT[kind] * Math.min(sceneWidth / 700, 1.4) * depth;
       const strideWave = Math.sin(agent.gait * Math.PI * 2);
       const hop = kind === 'rabbit' ? Math.max(0, strideWave) * desiredHeight * 0.13 * pose.movement : 0;
       // The successful encounter is mostly hidden by high grass. Keep the
-      // internal pounce phase for telemetry, but make the visible weight shift
-      // small and grounded instead of a cartoon leap.
-      const pounce = activity === 'pounce' ? Math.sin(Math.min(1, agent.activityTime / 0.65) * Math.PI) * desiredHeight * 0.075 : 0;
+      // internal pounce phase for telemetry, but make the visible weight
+      // shift small and grounded instead of a cartoon leap.
+      const pounce = activity === 'pounce' ? Math.sin(Math.min(1, agent.activityTime / 0.8) * Math.PI) * desiredHeight * 0.028 : 0;
       const breath = Math.sin(elapsed * 2.1 + agent.phase) * 0.007 * (1 - pose.movement);
       const weight = kind !== 'rabbit' ? Math.abs(strideWave) * desiredHeight * (running ? 0.025 : 0.012) * pose.movement : 0;
       target.save();
@@ -1302,7 +1301,7 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
         target.restore();
       }
 
-      if (moving && agent.opacity > 0.5) {
+      if ((visualMoving || running) && agent.opacity > 0.5) {
         for (let i = 0; i < 3; i++) {
           const age = (agent.gait * 1.4 + i / 3) % 1;
           const dustAlpha = running ? 0.2 : 0.1;
@@ -1926,13 +1925,6 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
   };
 
-  const onWheel = (e: WheelEvent<HTMLCanvasElement>) => {
-    const horizontalDelta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-    if (Math.abs(horizontalDelta) < 0.5) return;
-    e.preventDefault();
-    setCamera(cameraRef.current + horizontalDelta);
-  };
-
   const onKeyDown = (e: KeyboardEvent<HTMLCanvasElement>) => {
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && e.key !== 'Home' && e.key !== 'End') return;
     e.preventDefault();
@@ -1958,7 +1950,6 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
         onPointerMove={onPointerMove}
         onPointerUp={endPointerDrag}
         onPointerCancel={endPointerDrag}
-        onWheel={onWheel}
         onKeyDown={onKeyDown}
       />
       <div className="eco-pan-hud" aria-hidden="true">

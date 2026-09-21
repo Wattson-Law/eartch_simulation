@@ -48,6 +48,9 @@ export interface WildlifeAgent {
   goalY?: number;
   seed?: number;
   hiddenTime?: number;
+  route?: RoutePoint[];
+  routeGoalX?: number;
+  routeGoalY?: number;
 }
 
 export interface WildlifeWorld {
@@ -82,20 +85,101 @@ const WORLD_BOUNDS = { minX: 0.08, maxX: 0.93, minY: 0.61, maxY: 0.88 } as const
 const MAX_DT = 1 / 60;
 const HUGE_DT = 1.2;
 
+interface RoutePoint {
+  x: number;
+  y: number;
+}
+
+interface RouteNetwork {
+  points: RoutePoint[];
+  edges: { to: number; cost: number }[][];
+}
+
+let routeNetworkCache: RouteNetwork | null = null;
+
 const SPECIES_ORDER: WildlifeKind[] = ['rabbit', 'deer', 'wolf'];
 
 const MEADOWS = [
   { minX: 0.14, maxX: 0.88, minY: 0.63, maxY: 0.71 },
   { minX: 0.1, maxX: 0.48, minY: 0.67, maxY: 0.85 },
+  // The foreground bank continues under the river's lower edge. Keeping it
+  // as a separate meadow lets animals use the gravel side of the stream while
+  // the river exclusion below removes the blue channel itself.
+  { minX: 0.12, maxX: 0.92, minY: 0.76, maxY: 0.88 },
   { minX: 0.79, maxX: 0.92, minY: 0.67, maxY: 0.8 },
 ] as const;
 
 const WILLOW = { x: 0.61, y: 0.77, r: 0.065 };
 const BOULDER = { x: 0.6, y: 0.88, r: 0.075 };
 
+/**
+ * The rendered stream is a shallow, irregular ribbon across the panorama.
+ * Keep the geometry in the simulation layer as well as the renderer so
+ * representatives can route around the visible water instead of walking
+ * through it. All values use the same normalized 0–1 world coordinates as
+ * the Canvas scene.
+ */
+export interface RiverBounds {
+  center: number;
+  halfWidth: number;
+  upper: number;
+  lower: number;
+}
+
+export function riverProfileAt(unitX: number) {
+  const primaryBend = Math.sin(unitX * Math.PI * 2.15 + 0.55) * 0.085;
+  const secondaryBend = Math.sin(unitX * Math.PI * 4.4 - 0.25) * 0.02;
+  const recedingTurn = -Math.exp(-Math.pow((unitX - 0.47) / 0.18, 2)) * 0.07;
+  const floodplainBend = Math.exp(-Math.pow((unitX - 0.53) / 0.095, 2)) * 0.028;
+  const center = 0.79 + primaryBend + secondaryBend + recedingTurn;
+  const halfWidth = 0.017 + Math.max(0, center - 0.68) * 0.12 + floodplainBend;
+  return { center, halfWidth };
+}
+
+export function riverBankVariation(unitX: number) {
+  return (
+    Math.sin(unitX * Math.PI * 5.6 + 0.8) * 0.32 +
+    Math.sin(unitX * Math.PI * 9.2) * 0.12
+  );
+}
+
+export function riverBankCove(unitX: number) {
+  return (
+    Math.sin(unitX * Math.PI * 3.15 - 0.65) * 0.014 +
+    Math.sin(unitX * Math.PI * 7.4 + 0.25) * 0.005
+  );
+}
+
+/** Extra clearance keeps feet on the gravel/grass edge rather than the blue water. */
+export const RIVER_WILDLIFE_MARGIN = 0.012;
+
+export function riverBoundsAt(unitX: number, margin = 0): RiverBounds {
+  const profile = riverProfileAt(unitX);
+  const variation = riverBankVariation(unitX);
+  const cove = riverBankCove(unitX);
+  const upper = profile.center - profile.halfWidth * 1.28 * (1 + variation) + cove;
+  const lower = profile.center + profile.halfWidth * 1.62 * (1 - variation * 0.7) + cove * 0.6;
+  return {
+    ...profile,
+    upper: upper - margin,
+    lower: lower + margin,
+  };
+}
+
+export function isRiverWater(x: number, y: number, margin = RIVER_WILDLIFE_MARGIN) {
+  if (x < 0 || x > 1) return false;
+  const bounds = riverBoundsAt(x, margin);
+  return y >= bounds.upper && y <= bounds.lower;
+}
+
 export const WILDLIFE_COVER_PATCHES = [
-  { id: 'left-tall-grass', x: 0.3, y: 0.785, rx: 0.16, ry: 0.065, height: 0.12 },
-  { id: 'right-rushes', x: 0.855, y: 0.745, rx: 0.055, ry: 0.045, height: 0.1 },
+  // Shelters are distributed across the upper and lower meadow pockets;
+  // none overlaps the stream, so a fleeing animal can reach cover without
+  // crossing the water.
+  { id: 'left-tall-grass', x: 0.24, y: 0.7, rx: 0.13, ry: 0.052, height: 0.12 },
+  { id: 'right-rushes', x: 0.86, y: 0.7, rx: 0.055, ry: 0.04, height: 0.1 },
+  { id: 'lower-reeds', x: 0.43, y: 0.81, rx: 0.07, ry: 0.035, height: 0.11 },
+  { id: 'right-lower-reeds', x: 0.82, y: 0.85, rx: 0.05, ry: 0.028, height: 0.1 },
 ] as const;
 
 export const WILDLIFE_LABELS: Record<WildlifeKind, string> = {
@@ -124,6 +208,7 @@ export function isWalkable(x: number, y: number): boolean {
     return false;
   }
   if (!MEADOWS.some((m) => x >= m.minX && x <= m.maxX && y >= m.minY && y <= m.maxY)) return false;
+  if (isRiverWater(x, y)) return false;
   if (distance(x, y, WILLOW.x, WILLOW.y) < WILLOW.r) return false;
   if (distance(x, y, BOULDER.x, BOULDER.y) < BOULDER.r) return false;
   return true;
@@ -265,21 +350,24 @@ function createAgent(kind: WildlifeKind, index: number): WildlifeAgent {
 function startingPoint(kind: WildlifeKind, index: number) {
   const points: Record<WildlifeKind, { x: number; y: number }[]> = {
     rabbit: [
-      { x: 0.19, y: 0.8 },
-      { x: 0.84, y: 0.76 },
-      { x: 0.4, y: 0.75 },
-      { x: 0.22, y: 0.69 },
+      // Keep the initial representatives on the grass/gravel side of the
+      // stream. The old anchors sat inside the painted water ribbon, which
+      // made a rabbit appear to walk across the river on the first frame.
+      { x: 0.26, y: 0.715 },
+      { x: 0.84, y: 0.84 },
+      { x: 0.4, y: 0.78 },
+      { x: 0.22, y: 0.7 },
     ],
     deer: [
-      { x: 0.35, y: 0.67 },
+      { x: 0.35, y: 0.64 },
       // Keep the second elk in the middle meadow rather than stacking every
       // anchor at the far-right camera stop. It remains visible while the
       // right-hand wolf territory stays open and believable.
-      { x: 0.62, y: 0.7 },
+      { x: 0.7, y: 0.8 },
     ],
     wolf: [
-      { x: 0.25, y: 0.7 },
-      { x: 0.9, y: 0.69 },
+      { x: 0.25, y: 0.68 },
+      { x: 0.9, y: 0.74 },
     ],
   };
   return points[kind][index % points[kind].length]!;
@@ -316,8 +404,8 @@ function ensureHunt(world: WildlifeWorld, predationEvent: PendingPredation | nul
   if (world.pendingPredation) {
     const preferredExists = world.agents.some((a) => a.kind === world.pendingPredation?.preyKind);
     if (preferredExists) {
-      startHunt(world, world.pendingPredation.preyKind, true, world.pendingPredation.tick);
-      world.pendingPredation = null;
+      const started = startHunt(world, world.pendingPredation.preyKind, true, world.pendingPredation.tick);
+      if (started) world.pendingPredation = null;
       return;
     }
     world.pendingPredation = null;
@@ -342,7 +430,15 @@ function startHunt(world: WildlifeWorld, preferredPrey: 'rabbit' | 'deer', macro
   if (huntWolves.length === 0 || fallbackPrey.length === 0) return false;
 
   const predator = huntWolves.reduce((best, wolf) => (wolf.x > best.x ? wolf : best), huntWolves[0]!);
-  const target = nearest(predator, fallbackPrey);
+  // A stream is a real habitat boundary for this small scene. Pick a prey
+  // representative with a walkable route so a hunt never turns into two
+  // sprites sliding toward each other through the water.
+  const reachable = fallbackPrey.filter((candidate) => Number.isFinite(routeDistance(predator.x, predator.y, candidate.x, candidate.y)));
+  const target = nearest(predator, reachable.length > 0 ? reachable : fallbackPrey);
+  if (!target || !Number.isFinite(routeDistance(predator.x, predator.y, target.x, target.y))) {
+    world.nextHuntAt = world.time + 2.5;
+    return false;
+  }
   world.hunt = {
     predatorId: predator.id,
     preyId: target.id,
@@ -384,7 +480,10 @@ function updateHunt(world: WildlifeWorld, dt: number, predationEvent: PendingPre
     setActivity(predator, 'stalk');
     setActivity(prey, hunt.elapsed > 1.2 ? 'alert' : prey.kind === 'deer' ? 'graze' : 'roam');
     stalkPredator(predator, prey, dt);
-    if (hunt.elapsed > 1.8 || dist < 0.14) {
+    // Even when a representative starts nearby, keep a readable stalking beat
+    // before the run. This prevents a close spawn from looking like an
+    // instant slapstick collision and gives the alert pose room to register.
+    if (hunt.elapsed > 2.4 || (hunt.elapsed > 1.2 && dist < 0.1)) {
       setHuntPhase(hunt, 'chase', predator, prey);
     }
   } else if (hunt.phase === 'chase') {
@@ -407,7 +506,7 @@ function updateHunt(world: WildlifeWorld, dt: number, predationEvent: PendingPre
     predator.vx *= 0.72;
     predator.vy *= 0.72;
     steerTo(prey, coverEntryPoint(prey), dt, recoveryCoverSpeed(prey) * 1.15);
-    if (hunt.elapsed > 0.3) {
+    if (hunt.elapsed > 0.55) {
       setHuntPhase(hunt, 'feed', predator, prey);
     }
   } else if (hunt.phase === 'feed') {
@@ -423,7 +522,7 @@ function updateHunt(world: WildlifeWorld, dt: number, predationEvent: PendingPre
     if ((prey.cover ?? 0) > 0.36) {
       prey.opacity = approach(prey.opacity, 0.01, dt * 18);
     }
-    if (hunt.elapsed > 3.6) {
+    if (hunt.elapsed > 3.0) {
       setHuntPhase(hunt, 'recoverCaught', predator, prey);
     }
   } else if (hunt.phase === 'escaped') {
@@ -482,6 +581,30 @@ function updateAmbientAgent(world: WildlifeWorld, agent: WildlifeAgent, dt: numb
     setActivity(agent, 'emerge');
     agent.goalX = exit.x;
     agent.goalY = exit.y;
+    aimAt(agent, exit);
+  }
+
+  // A quiet animal may choose to disappear into reeds or tall grass without
+  // being hunted. It first walks to cover at a crawl, settles there for a
+  // while, then eases back out through the same opening. Keeping this state
+  // in the simulation makes the hide/reveal transition consistent with the
+  // foliage occlusion used by the Canvas renderer.
+  if (agent.activity === 'hide') {
+    const coverGoal = coverEntryPoint(agent);
+    if ((agent.cover ?? 0) < 0.58 || distance(agent.x, agent.y, coverGoal.x, coverGoal.y) > 0.02) {
+      steerTo(agent, coverGoal, dt, speedFor(agent.kind, 'hide'));
+    } else {
+      agent.vx *= Math.max(0, 1 - dt * 5.5);
+      agent.vy *= Math.max(0, 1 - dt * 5.5);
+      if (agent.activityTime > hideDuration(agent)) {
+        const exit = coverExitPoint(agent, agent.coverId);
+        setActivity(agent, 'emerge');
+        agent.goalX = exit.x;
+        agent.goalY = exit.y;
+        aimAt(agent, exit);
+      }
+    }
+    return;
   }
 
   const danger = nearbyDanger(world, agent);
@@ -495,7 +618,7 @@ function updateAmbientAgent(world: WildlifeWorld, agent: WildlifeAgent, dt: numb
     return;
   }
 
-  const needGoal = agent.activityTime > ambientDuration(agent) || !isWalkable(agent.goalX ?? agent.x, agent.goalY ?? agent.y);
+  const needGoal = agent.activity !== 'emerge' && (agent.activityTime > ambientDuration(agent) || !isWalkable(agent.goalX ?? agent.x, agent.goalY ?? agent.y));
   if (needGoal) {
     const next = chooseAmbientActivity(world, agent);
     setActivity(agent, next.activity);
@@ -534,8 +657,12 @@ function updateAmbientAgent(world: WildlifeWorld, agent: WildlifeAgent, dt: numb
   if (agent.activity === 'emerge') {
     const exit = { x: agent.goalX ?? agent.x, y: agent.goalY ?? agent.y };
     steerTo(agent, exit, dt, speedFor(agent.kind, 'emerge'));
-    if (distance(agent.x, agent.y, exit.x, exit.y) < 0.018 || agent.activityTime > 2.4) {
-      setActivity(agent, agent.kind === 'rabbit' ? 'graze' : 'roam');
+    if (distance(agent.x, agent.y, exit.x, exit.y) < 0.018 || (agent.activityTime > 4.2 && (agent.cover ?? 0) < 0.2)) {
+      // Emerging from cover is a cautious observation beat. Let the animal
+      // settle and look around before choosing another forage route; sending
+      // it straight into a fresh graze goal made a rabbit appear to retreat
+      // into the same grass patch immediately after revealing itself.
+      setActivity(agent, 'rest');
       agent.goalX = agent.x;
       agent.goalY = agent.y;
     }
@@ -561,11 +688,20 @@ function chooseAmbientActivity(world: WildlifeWorld, agent: WildlifeAgent) {
   const roll = hash(agent.seed ?? 1, Math.floor(world.time * 1.7) + Math.floor(agent.phase * 10));
   const anchor = isPanoramaAnchor(agent);
   if (agent.kind === 'wolf') {
+    if (!anchor && roll < 0.1) {
+      const cover = coverEntryPoint(agent);
+      return { activity: 'hide' as const, x: cover.x, y: cover.y };
+    }
     const activity: WildlifeActivity = roll > 0.72 ? 'rest' : roll > 0.5 ? 'alert' : 'roam';
     // Lamar wolves patrol an established territory around the forest edge;
     // keeping ambient goals near their home range prevents the whole pack
     // from drifting out of a wide panorama after a hunt.
     return { activity, ...randomWalkable(agent.seed ?? 1, world.time, agent.homeX ?? agent.x, agent.homeY ?? agent.y, anchor ? 0.075 : 0.14) };
+  }
+  const hideChance = agent.kind === 'rabbit' ? 0.18 : 0.14;
+  if (!anchor && roll < hideChance) {
+    const cover = coverEntryPoint(agent);
+    return { activity: 'hide' as const, x: cover.x, y: cover.y };
   }
   if (!anchor && roll > 0.82) return { activity: 'drink' as const, ...riverEdgePoint(agent.seed ?? 1, world.time) };
   if (roll > 0.58) return { activity: 'graze' as const, ...randomWalkable(agent.seed ?? 1, world.time, agent.homeX ?? agent.x, agent.homeY ?? agent.y, anchor ? 0.08 : 0.16) };
@@ -631,6 +767,11 @@ function fleeFrom(prey: WildlifeAgent, predator: WildlifeAgent, dt: number) {
   const len = Math.max(0.001, Math.hypot(dx, dy));
   const far = projectToWalkable(prey.x + (dx / len) * 0.24, prey.y + (dy / len) * 0.18);
   steerTo(prey, far, dt, speedFor(prey.kind, 'flee'));
+}
+
+function aimAt(agent: WildlifeAgent, goal: { x: number; y: number }) {
+  const heading = Math.atan2(goal.y - agent.y, goal.x - agent.x);
+  agent.targetHeading = heading;
 }
 
 function steerTo(agent: WildlifeAgent, goal: { x: number; y: number }, dt: number, speed: number) {
@@ -704,16 +845,131 @@ function integrate(agent: WildlifeAgent, dt: number) {
 }
 
 function routeGoal(agent: WildlifeAgent, goal: { x: number; y: number }) {
-  if (hasLineOfSight(agent.x, agent.y, goal.x, goal.y)) return goal;
-  const bridges = [
-    projectToWalkable(0.46, 0.665),
-    projectToWalkable(0.66, 0.665),
-    projectToWalkable(0.8, 0.68),
-  ];
-  const visibleBridge = bridges.find((bridge) => hasLineOfSight(agent.x, agent.y, bridge.x, bridge.y));
-  if (visibleBridge && !hasLineOfSight(visibleBridge.x, visibleBridge.y, goal.x, goal.y)) return visibleBridge;
-  if (visibleBridge && distance(agent.x, agent.y, visibleBridge.x, visibleBridge.y) > 0.035) return visibleBridge;
-  return goal;
+  const clippedGoal = projectToWalkable(goal.x, goal.y);
+  if (hasLineOfSight(agent.x, agent.y, clippedGoal.x, clippedGoal.y)) {
+    agent.route = undefined;
+    agent.routeGoalX = undefined;
+    agent.routeGoalY = undefined;
+    return clippedGoal;
+  }
+
+  const targetChanged =
+    agent.routeGoalX === undefined ||
+    agent.routeGoalY === undefined ||
+    distance(agent.routeGoalX, agent.routeGoalY, clippedGoal.x, clippedGoal.y) > 0.018;
+  if (targetChanged || !agent.route || agent.route.length === 0 || !hasLineOfSight(agent.x, agent.y, agent.route[0]!.x, agent.route[0]!.y)) {
+    agent.route = findRoute({ x: agent.x, y: agent.y }, clippedGoal);
+    agent.routeGoalX = clippedGoal.x;
+    agent.routeGoalY = clippedGoal.y;
+  }
+
+  while (agent.route && agent.route.length > 0 && distance(agent.x, agent.y, agent.route[0]!.x, agent.route[0]!.y) < 0.018) {
+    agent.route.shift();
+  }
+  return agent.route?.[0] ?? clippedGoal;
+}
+
+function findRoute(start: RoutePoint, goal: RoutePoint): RoutePoint[] {
+  if (hasLineOfSight(start.x, start.y, goal.x, goal.y)) return [goal];
+  const network = getRouteNetwork();
+  const startLinks = visibleRouteLinks(start, network.points);
+  const goalLinks = visibleRouteLinks(goal, network.points);
+  if (startLinks.length === 0 || goalLinks.length === 0) return [goal];
+
+  const distances = new Array<number>(network.points.length).fill(Number.POSITIVE_INFINITY);
+  const previous = new Array<number>(network.points.length).fill(-1);
+  const visited = new Set<number>();
+  for (const link of startLinks) distances[link.index] = link.cost;
+
+  while (visited.size < network.points.length) {
+    let current = -1;
+    let best = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < distances.length; i++) {
+      if (!visited.has(i) && distances[i]! < best) {
+        current = i;
+        best = distances[i]!;
+      }
+    }
+    if (current < 0) break;
+    visited.add(current);
+    for (const edge of network.edges[current]!) {
+      if (visited.has(edge.to)) continue;
+      const candidate = best + edge.cost;
+      if (candidate < distances[edge.to]!) {
+        distances[edge.to] = candidate;
+        previous[edge.to] = current;
+      }
+    }
+  }
+
+  const goalLink = goalLinks.reduce<{ index: number; cost: number } | null>((bestLink, link) => {
+    const total = distances[link.index]! + link.cost;
+    if (!Number.isFinite(distances[link.index]!) || (bestLink && total >= bestLink.cost)) return bestLink;
+    return { index: link.index, cost: total };
+  }, null);
+  if (!goalLink) return [goal];
+
+  const indices: number[] = [];
+  let cursor = goalLink.index;
+  while (cursor >= 0) {
+    indices.push(cursor);
+    cursor = previous[cursor]!;
+  }
+  indices.reverse();
+  return [...indices.map((index) => network.points[index]!), goal];
+}
+
+function visibleRouteLinks(point: RoutePoint, nodes: RoutePoint[]) {
+  const links = nodes
+    .map((node, index) => ({ index, cost: distance(point.x, point.y, node.x, node.y) }))
+    .filter((link) => link.cost <= 0.18 && hasLineOfSight(point.x, point.y, nodes[link.index]!.x, nodes[link.index]!.y));
+  if (links.length > 0) return links;
+  return nodes
+    .map((node, index) => ({ index, cost: distance(point.x, point.y, node.x, node.y) }))
+    .filter((link) => hasLineOfSight(point.x, point.y, nodes[link.index]!.x, nodes[link.index]!.y))
+    .sort((a, b) => a.cost - b.cost)
+    .slice(0, 4);
+}
+
+function getRouteNetwork(): RouteNetwork {
+  if (routeNetworkCache) return routeNetworkCache;
+  const points: RoutePoint[] = [];
+  const addPoint = (x: number, y: number) => {
+    if (!isWalkable(x, y)) return;
+    if (points.some((point) => distance(point.x, point.y, x, y) < 0.012)) return;
+    points.push({ x, y });
+  };
+
+  // A coarse grid is enough for this small panorama. The extra bank samples
+  // retain a route when the stream's bend removes a whole row of meadow.
+  for (let x = 0.1; x <= 0.92 + 1e-9; x += 0.05) {
+    for (let y = 0.63; y <= 0.87 + 1e-9; y += 0.03) addPoint(Number(x.toFixed(3)), Number(y.toFixed(3)));
+    const bounds = riverBoundsAt(x);
+    addPoint(Number(x.toFixed(3)), clamp(bounds.upper - 0.018, 0.63, 0.71));
+    addPoint(Number(x.toFixed(3)), clamp(bounds.lower + 0.018, 0.76, 0.87));
+  }
+  for (const patch of WILDLIFE_COVER_PATCHES) {
+    const entry = coverEntryForPatch(patch);
+    addPoint(entry.x, entry.y);
+  }
+  for (const point of [
+    { x: 0.09, y: 0.66 },
+    { x: 0.09, y: 0.82 },
+    { x: 0.93, y: 0.68 },
+    { x: 0.93, y: 0.86 },
+  ]) addPoint(point.x, point.y);
+
+  const edges = points.map(() => [] as { to: number; cost: number }[]);
+  for (let i = 0; i < points.length; i++) {
+    for (let j = i + 1; j < points.length; j++) {
+      const cost = distance(points[i]!.x, points[i]!.y, points[j]!.x, points[j]!.y);
+      if (cost > 0.15 || !hasLineOfSight(points[i]!.x, points[i]!.y, points[j]!.x, points[j]!.y)) continue;
+      edges[i]!.push({ to: j, cost });
+      edges[j]!.push({ to: i, cost });
+    }
+  }
+  routeNetworkCache = { points, edges };
+  return routeNetworkCache;
 }
 
 function applySeparation(agents: WildlifeAgent[], dt: number, hunt: HuntState | null) {
@@ -727,7 +983,13 @@ function applySeparation(agents: WildlifeAgent[], dt: number, hunt: HuntState | 
       const dy = (a.y - b.y) * (9 / 16);
       const d = Math.max(0.001, Math.hypot(dx, dy));
       if (d >= wanted) continue;
-      const push = ((wanted - d) / wanted) * dt * 0.42;
+      // A hidden animal is already visually separated by grass or reeds. A
+      // full flocking impulse during the hide/emerge transition can shove it
+      // back into a river bank or cover patch, so let the transition finish
+      // before restoring the normal spacing force.
+      const coverTransition = ['hide', 'emerge', 'rest', 'feed', 'pounce', 'recoverCaught'].includes(a.activity)
+        || ['hide', 'emerge', 'rest', 'feed', 'pounce', 'recoverCaught'].includes(b.activity);
+      const push = ((wanted - d) / wanted) * dt * (coverTransition ? 0 : 0.42);
       a.vx += (dx / d) * push;
       a.vy += ((dy / d) * push) / (9 / 16);
       b.vx -= (dx / d) * push;
@@ -789,7 +1051,7 @@ function updateObservation(world: WildlifeWorld) {
     };
   } else if (world.hunt.phase === 'pounce' || world.hunt.phase === 'feed') {
     world.observation = {
-      text: '追逐在高草边缘短暂交错，猎物被草丛遮住，灰狼停在林缘观察。',
+      text: '灰狼在高草边缘停住，猎物钻入草丛，植被截断了后半段视线。',
       phase: 'caught',
       predatorId: world.hunt.predatorId,
       preyId: world.hunt.preyId,
@@ -869,7 +1131,13 @@ function randomWalkable(seed: number, time: number, centerX: number, centerY: nu
 
 function riverEdgePoint(seed: number, time: number) {
   const t = hash(seed + 9, Math.floor(time) + 1);
-  return projectToWalkable(0.38 + t * 0.22, 0.7 + hash(seed + 13, Math.floor(time)) * 0.02);
+  const x = 0.38 + t * 0.22;
+  const bounds = riverBoundsAt(x);
+  const upperBank = hash(seed + 13, Math.floor(time) + 2) > 0.5;
+  // Stop just outside the waterline. The final projection keeps the feet on
+  // walkable ground even when a bank cove narrows unexpectedly.
+  const y = upperBank ? bounds.upper - 0.018 : bounds.lower + 0.018;
+  return projectToWalkable(x, y);
 }
 
 function fireSafePoint(agent: WildlifeAgent) {
@@ -878,11 +1146,11 @@ function fireSafePoint(agent: WildlifeAgent) {
 
 function speedFor(kind: WildlifeKind, activity: WildlifeActivity) {
   if (activity === 'chase' || activity === 'flee') return kind === 'wolf' ? 0.24 : kind === 'deer' ? 0.22 : 0.18;
-  if (activity === 'hide') return kind === 'deer' ? 0.12 : 0.1;
-  if (activity === 'emerge') return kind === 'rabbit' ? 0.085 : 0.07;
-  if (activity === 'stalk') return 0.055;
-  if (activity === 'drink' || activity === 'roam') return kind === 'wolf' ? 0.08 : 0.06;
-  if (activity === 'graze') return 0.035;
+  if (activity === 'hide') return kind === 'deer' ? 0.032 : kind === 'wolf' ? 0.028 : 0.04;
+  if (activity === 'emerge') return kind === 'rabbit' ? 0.045 : 0.035;
+  if (activity === 'stalk') return 0.032;
+  if (activity === 'drink' || activity === 'roam') return kind === 'wolf' ? 0.038 : 0.028;
+  if (activity === 'graze') return 0.016;
   return 0;
 }
 
@@ -901,9 +1169,14 @@ function gaitScale(kind: WildlifeKind, activity: WildlifeActivity) {
 
 function ambientDuration(agent: WildlifeAgent) {
   const roll = hash(agent.seed ?? 1, Math.floor(agent.phase * 0.3));
-  if (agent.activity === 'rest' || agent.activity === 'graze') return 2.1 + roll * 3.2;
-  if (agent.activity === 'alert') return 1 + roll * 1.8;
-  return 2.4 + roll * 2.6;
+  if (agent.activity === 'rest' || agent.activity === 'graze') return 3.2 + roll * 4.4;
+  if (agent.activity === 'alert') return 1.8 + roll * 2.4;
+  return 3.8 + roll * 3.8;
+}
+
+function hideDuration(agent: WildlifeAgent) {
+  const base = agent.kind === 'rabbit' ? 2.6 : agent.kind === 'deer' ? 3.4 : 3.8;
+  return base + hash(agent.seed ?? 1, Math.floor(agent.phase * 1.7) + 19) * 2.8;
 }
 
 function catchDistance(kind: WildlifeKind) {
@@ -930,14 +1203,33 @@ function rotateTowards(from: number, to: number, amount: number) {
 }
 
 function coverEntryPoint(agent: WildlifeAgent) {
-  return WILDLIFE_COVER_PATCHES.map((patch) => coverEntryForPatch(patch))
-    .sort((a, b) => routeDistance(agent.x, agent.y, a.x, a.y) - routeDistance(agent.x, agent.y, b.x, b.y))[0]!;
+  const preferredId = agent.x > 0.56 ? 'right-rushes' : 'left-tall-grass';
+  const orderedPatches = [...WILDLIFE_COVER_PATCHES].sort((a, b) => {
+    if (a.id === preferredId) return -1;
+    if (b.id === preferredId) return 1;
+    return 0;
+  });
+  return orderedPatches
+    .map((patch) => {
+      const point = coverEntryForPatch(patch);
+      return { point, route: routeDistance(agent.x, agent.y, point.x, point.y) };
+    })
+    .sort((a, b) => {
+      const aFinite = Number.isFinite(a.route);
+      const bFinite = Number.isFinite(b.route);
+      if (aFinite !== bFinite) return aFinite ? -1 : 1;
+      return a.route - b.route;
+    })[0]!.point;
 }
 
-function coverExitPoint(agent: WildlifeAgent, preferredId?: (typeof WILDLIFE_COVER_PATCHES)[number]['id']) {
+function coverExitPoint(agent: WildlifeAgent, preferredId?: string) {
   const patch = (preferredId ? WILDLIFE_COVER_PATCHES.find((p) => p.id === preferredId) : nearestCoverPatch(agent.x, agent.y)) ?? WILDLIFE_COVER_PATCHES[0]!;
   const side = agent.x < patch.x ? -1 : 1;
-  return projectToWalkable(patch.x + patch.rx * (0.9 * side), patch.y - patch.ry * 0.78);
+  // Move back toward the open meadow, away from the stream, when an animal
+  // reveals itself. The lower reeds use the opposite direction because they
+  // sit below the water ribbon.
+  const awayFromRiver = patch.id.includes('lower') ? patch.ry * 1.55 : -patch.ry * 1.55;
+  return projectToWalkable(patch.x + patch.rx * (0.9 * side), patch.y + awayFromRiver);
 }
 
 function coverEntryForPatch(patch: (typeof WILDLIFE_COVER_PATCHES)[number]) {
@@ -967,18 +1259,14 @@ function normalizedCoverDistance(x: number, y: number, patch: (typeof WILDLIFE_C
 }
 
 function routeDistance(ax: number, ay: number, bx: number, by: number) {
-  if (hasLineOfSight(ax, ay, bx, by)) return distance(ax, ay, bx, by);
-  const bridges = [
-    projectToWalkable(0.46, 0.665),
-    projectToWalkable(0.66, 0.665),
-    projectToWalkable(0.8, 0.68),
-  ];
-  let best = Number.POSITIVE_INFINITY;
-  for (const bridge of bridges) {
-    if (!hasLineOfSight(ax, ay, bridge.x, bridge.y) || !hasLineOfSight(bridge.x, bridge.y, bx, by)) continue;
-    best = Math.min(best, distance(ax, ay, bridge.x, bridge.y) + distance(bridge.x, bridge.y, bx, by));
+  const path = findRoute({ x: ax, y: ay }, { x: bx, y: by });
+  let total = 0;
+  let from = { x: ax, y: ay };
+  for (const point of path) {
+    total += distance(from.x, from.y, point.x, point.y);
+    from = point;
   }
-  return best;
+  return path.length > 0 && hasLineOfSight(ax, ay, path[0]!.x, path[0]!.y) ? total : Number.POSITIVE_INFINITY;
 }
 
 function byId(world: WildlifeWorld, id: string) {

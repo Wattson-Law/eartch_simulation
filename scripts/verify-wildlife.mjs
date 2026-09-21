@@ -21,6 +21,8 @@ const {
   WILDLIFE_LABELS,
   createWildlifeWorld,
   isWalkable,
+  isRiverWater,
+  riverBoundsAt,
   stepWildlife,
 } = wildlife;
 
@@ -135,8 +137,10 @@ function forceRecoverCaught(kind, position) {
   assert.deepEqual(
     WILDLIFE_COVER_PATCHES.map(({ id, x, y, rx, ry }) => ({ id, x, y, rx, ry })),
     [
-      { id: 'left-tall-grass', x: 0.3, y: 0.785, rx: 0.16, ry: 0.065 },
-      { id: 'right-rushes', x: 0.855, y: 0.745, rx: 0.055, ry: 0.045 },
+      { id: 'left-tall-grass', x: 0.24, y: 0.7, rx: 0.13, ry: 0.052 },
+      { id: 'right-rushes', x: 0.86, y: 0.7, rx: 0.055, ry: 0.04 },
+      { id: 'lower-reeds', x: 0.43, y: 0.81, rx: 0.07, ry: 0.035 },
+      { id: 'right-lower-reeds', x: 0.82, y: 0.85, rx: 0.05, ry: 0.028 },
     ],
     'cover patch geometry stays stable for renderer occlusion',
   );
@@ -292,7 +296,7 @@ function forceRecoverCaught(kind, position) {
 
 {
   const samples = sampleWalkablePositions();
-  assert.equal(samples.length, 41, 'forced recovery samples cover forty-one walkable points');
+  assert.equal(samples.length, 38, 'forced recovery samples cover the walkable meadow and bank points');
   const recoveries = [];
   for (const kind of ['rabbit', 'deer']) {
     for (const position of samples) {
@@ -478,6 +482,31 @@ function forceRecoverCaught(kind, position) {
   assert.equal(isWalkable(0.6, 0.88), false, 'foreground boulder is excluded');
   assert.equal(isWalkable(0.3, 0.69), true, 'upper meadow is walkable');
   assert.equal(isWalkable(0.86, 0.74), true, 'right meadow is walkable');
+  const centerRiver = riverBoundsAt(0.5);
+  assert.equal(isRiverWater(0.5, centerRiver.center), true, 'river center is water');
+  assert.equal(isWalkable(0.5, centerRiver.center), false, 'wildlife cannot stand in the river');
+  assert.equal(isWalkable(0.5, centerRiver.lower + 0.07), true, 'lower gravel bank remains walkable');
+  assert.equal(isWalkable(0.3, 0.68), true, 'upper grass bank remains walkable');
+}
+
+{
+  const s = state({ wolves: 0 });
+  const world = createWildlifeWorld(s);
+  let maxAmbientSpeed = 0;
+  let sawHide = false;
+  let sawEmerge = false;
+  for (let frame = 0; frame < 60 * 28; frame++) {
+    stepWildlife(world, 1 / 60, s);
+    for (const agent of world.agents) {
+      maxAmbientSpeed = Math.max(maxAmbientSpeed, Math.hypot(agent.vx, agent.vy));
+      sawHide ||= agent.activity === 'hide';
+      sawEmerge ||= agent.activity === 'emerge';
+      assert.equal(isRiverWater(agent.x, agent.y), false, `${agent.id} stays on the bank or meadow`);
+    }
+  }
+  assert(maxAmbientSpeed < 0.075, `ambient movement stays slow (${maxAmbientSpeed.toFixed(4)})`);
+  assert(sawHide, 'quiet wildlife uses a visible hide state');
+  assert(sawEmerge, 'quiet wildlife transitions back out of cover');
 }
 
 console.log('wildlife behavior regression passed');
