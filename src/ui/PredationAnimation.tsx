@@ -5,7 +5,13 @@ interface Props {
   paused: boolean;
 }
 
-const PHASES = { quiet: '河谷日常', stalk: '发现踪迹', chase: '追逐中', caught: '捕食结束', escaped: '成功脱险' };
+const PHASES = {
+  quiet: '河谷日常',
+  stalk: '远处观察',
+  chase: '短暂追逐',
+  caught: '植被遮挡',
+  escaped: '猎物脱险',
+};
 
 /** Describes the encounter actually unfolding in the landscape above. */
 export function PredationAnimation({ observation, paused }: Props) {

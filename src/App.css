@@ -588,6 +588,9 @@ button:focus-visible, input:focus-visible {
   .species-icon { min-height: 32px; }
   .env-row { gap: 5px 10px; font-size: 0.72rem; }
   .field-observation .observation-copy { flex-direction: column; align-items: start; gap: 2px; }
+  .eco-pan-hud { left: 9px; right: 9px; bottom: 8px; gap: 6px; font-size: .58rem; }
+  .eco-pan-hud__hint { max-width: 84px; white-space: normal; line-height: 1.15; }
+  .eco-pan-hud__keys { display: none; }
 }
 
 .field-observation {
@@ -758,6 +761,9 @@ button:focus-visible, input:focus-visible {
   flex: 0 0 auto;
   border-radius: 12px;
   overflow: hidden;
+  isolation: isolate;
+  overscroll-behavior: contain;
+  background: #afc4c6;
 }
 
 .eco-scene-wrap .eco-scene-canvas {
@@ -768,7 +774,65 @@ button:focus-visible, input:focus-visible {
   border-radius: 12px;
   display: block;
   background: #e3f2fd;
-  cursor: crosshair;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  outline-offset: -4px;
+}
+
+.eco-scene-wrap .eco-scene-canvas:active {
+  cursor: grabbing;
+}
+
+.eco-scene-wrap .eco-scene-canvas:focus-visible {
+  outline: 2px solid rgba(243, 222, 172, .9);
+}
+
+.eco-pan-hud {
+  position: absolute;
+  z-index: 3;
+  left: 12px;
+  right: 12px;
+  bottom: 10px;
+  display: grid;
+  grid-template-columns: auto minmax(80px, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+  color: rgba(245, 241, 218, .88);
+  font-size: .64rem;
+  letter-spacing: .03em;
+  text-shadow: 0 1px 3px rgba(26, 41, 40, .6);
+}
+
+.eco-pan-hud__hint {
+  white-space: nowrap;
+}
+
+.eco-pan-hud__track {
+  position: relative;
+  height: 3px;
+  border-radius: 99px;
+  background: rgba(245, 241, 218, .35);
+  box-shadow: 0 0 0 1px rgba(34, 58, 52, .18);
+}
+
+.eco-pan-hud__thumb {
+  position: absolute;
+  top: 50%;
+  width: 22%;
+  min-width: 18px;
+  height: 7px;
+  border-radius: 99px;
+  background: rgba(250, 235, 183, .95);
+  transform: translate(-50%, -50%);
+  box-shadow: 0 1px 4px rgba(34, 58, 52, .32);
+}
+
+.eco-pan-hud__keys {
+  min-width: 24px;
+  text-align: right;
+  opacity: .82;
 }
 
 .eco-tooltip {

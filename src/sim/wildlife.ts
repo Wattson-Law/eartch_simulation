@@ -31,6 +31,8 @@ export interface WildlifeAgent {
   vx: number;
   vy: number;
   facing: 1 | -1;
+  heading: number;
+  targetHeading: number;
   activity: WildlifeActivity;
   activityTime: number;
   phase: number;
@@ -66,6 +68,7 @@ interface HuntState {
   phase: 'stalk' | 'chase' | 'pounce' | 'feed' | 'recoverCaught' | 'escaped';
   elapsed: number;
   macroBacked: boolean;
+  successPlanned: boolean;
   consumedTick?: number;
 }
 
@@ -136,7 +139,7 @@ export function createWildlifeWorld(state: EcosystemState): WildlifeWorld {
     },
     hunt: null,
     pendingPredation: null,
-    nextHuntAt: state.fire ? 999 : 2.4,
+    nextHuntAt: state.fire ? 999 : 5.5,
     lastPredationTick: state.lastPredation ? state.tick : -1,
     lastCounts: { rabbit: 0, deer: 0, wolf: 0 },
   };
@@ -160,7 +163,10 @@ export function stepWildlife(world: WildlifeWorld, dt: number, state: EcosystemS
 function stepSlice(world: WildlifeWorld, dt: number, state: EcosystemState) {
   world.time += dt;
   const predationEvent = takePredationEvent(world, state);
-  if (predationEvent) world.pendingPredation = predationEvent;
+  // Hold the first unobserved field event until the visual encounter can
+  // begin; replacing it every macro tick creates a rapid chain of identical
+  // pursuits when the population model is under pressure.
+  if (predationEvent && !world.pendingPredation) world.pendingPredation = predationEvent;
   for (const agent of world.agents) agent.activityTime += dt;
 
   if (state.fire) {
@@ -198,10 +204,15 @@ function stepSlice(world: WildlifeWorld, dt: number, state: EcosystemState) {
 }
 
 function reconcileAgents(world: WildlifeWorld, state: EcosystemState) {
+  // The macro counts drive the ecology, while these representatives keep a
+  // wide camera view inhabited. A single representative can disappear into
+  // the opposite end of the panorama for several seconds, which makes a
+  // living valley look empty even though the simulation is healthy.
+  const representativeFloor = (population: number) => (population > 0 ? 2 : 0);
   const wanted = {
-    rabbit: state.rabbits > 0 ? Math.min(CAPS.rabbit, Math.ceil(state.rabbits / 50)) : 0,
-    deer: state.elk > 0 ? Math.min(CAPS.deer, Math.ceil(state.elk / 70)) : 0,
-    wolf: state.wolves > 0 ? Math.min(CAPS.wolf, Math.ceil(state.wolves / 8)) : 0,
+    rabbit: state.rabbits > 0 ? Math.min(CAPS.rabbit, Math.max(representativeFloor(state.rabbits), Math.ceil(state.rabbits / 50))) : 0,
+    deer: state.elk > 0 ? Math.min(CAPS.deer, Math.max(representativeFloor(state.elk), Math.ceil(state.elk / 70))) : 0,
+    wolf: state.wolves > 0 ? Math.min(CAPS.wolf, Math.max(representativeFloor(state.wolves), Math.ceil(state.wolves / 8))) : 0,
   };
 
   const next: WildlifeAgent[] = [];
@@ -216,7 +227,7 @@ function reconcileAgents(world: WildlifeWorld, state: EcosystemState) {
   if (world.hunt && (!ids.has(world.hunt.predatorId) || !ids.has(world.hunt.preyId))) {
     world.hunt = null;
     clearTargets(world);
-    world.nextHuntAt = Math.max(world.nextHuntAt ?? 0, world.time + 4);
+    world.nextHuntAt = Math.max(world.nextHuntAt ?? 0, world.time + 8);
   }
   world.agents = next;
   world.lastCounts = wanted;
@@ -233,6 +244,8 @@ function createAgent(kind: WildlifeKind, index: number): WildlifeAgent {
     vx: 0,
     vy: 0,
     facing: hash(seed, 8) > 0.5 ? 1 : -1,
+    heading: hash(seed, 8) > 0.5 ? 0 : Math.PI,
+    targetHeading: hash(seed, 8) > 0.5 ? 0 : Math.PI,
     activity: kind === 'rabbit' && index === 0 ? 'hide' : kind === 'wolf' ? 'roam' : index % 2 === 0 ? 'graze' : 'rest',
     activityTime: hash(seed, 11) * 3,
     phase: hash(seed, 12) * 10,
@@ -253,17 +266,20 @@ function startingPoint(kind: WildlifeKind, index: number) {
   const points: Record<WildlifeKind, { x: number; y: number }[]> = {
     rabbit: [
       { x: 0.19, y: 0.8 },
-      { x: 0.28, y: 0.82 },
+      { x: 0.84, y: 0.76 },
       { x: 0.4, y: 0.75 },
       { x: 0.22, y: 0.69 },
     ],
     deer: [
       { x: 0.35, y: 0.67 },
-      { x: 0.55, y: 0.66 },
+      // Keep the second elk in the middle meadow rather than stacking every
+      // anchor at the far-right camera stop. It remains visible while the
+      // right-hand wolf territory stays open and believable.
+      { x: 0.62, y: 0.7 },
     ],
     wolf: [
-      { x: 0.85, y: 0.75 },
-      { x: 0.78, y: 0.68 },
+      { x: 0.25, y: 0.7 },
+      { x: 0.9, y: 0.69 },
     ],
   };
   return points[kind][index % points[kind].length]!;
@@ -288,13 +304,14 @@ function ensureHunt(world: WildlifeWorld, predationEvent: PendingPredation | nul
   if (world.hunt) {
     if (predationEvent && world.hunt.phase === 'chase' && world.hunt.consumedTick !== predationEvent.tick && world.hunt.preyKind === predationEvent.preyKind) {
       world.hunt.macroBacked = true;
+      world.hunt.successPlanned ||= plannedSuccess(byId(world, world.hunt.preyId), predationEvent.tick);
       world.hunt.consumedTick = predationEvent.tick;
       world.pendingPredation = null;
     }
     return;
   }
 
-  if (world.time < (world.nextHuntAt ?? 2.4)) return;
+  if (world.time < (world.nextHuntAt ?? 5.5)) return;
 
   if (world.pendingPredation) {
     const preferredExists = world.agents.some((a) => a.kind === world.pendingPredation?.preyKind);
@@ -312,12 +329,19 @@ function ensureHunt(world: WildlifeWorld, predationEvent: PendingPredation | nul
 
 function startHunt(world: WildlifeWorld, preferredPrey: 'rabbit' | 'deer', macroBacked: boolean, consumedTick?: number) {
   const wolves = world.agents.filter((a) => a.kind === 'wolf');
-  const prey = world.agents.filter((a) => a.kind === preferredPrey);
+  // Keep one representative at the far end of the panorama as a quiet
+  // territory anchor. Other individuals can take part in the encounter and
+  // return to their home range afterwards, so a long camera pan never loses
+  // an entire species from view.
+  const huntWolves = wolves.length > 1 ? wolves.filter((wolf) => !isPanoramaAnchor(wolf)) : wolves;
+  const prey = world.agents.filter((a) => a.kind === preferredPrey && !isPanoramaAnchor(a));
   if (macroBacked && prey.length === 0) return false;
-  const fallbackPrey = prey.length > 0 ? prey : world.agents.filter((a) => a.kind === 'rabbit' || a.kind === 'deer');
-  if (wolves.length === 0 || fallbackPrey.length === 0) return false;
+  const fallbackPrey = prey.length > 0
+    ? prey
+    : world.agents.filter((a) => (a.kind === 'rabbit' || a.kind === 'deer') && !isPanoramaAnchor(a));
+  if (huntWolves.length === 0 || fallbackPrey.length === 0) return false;
 
-  const predator = wolves.reduce((best, wolf) => (wolf.x > best.x ? wolf : best), wolves[0]!);
+  const predator = huntWolves.reduce((best, wolf) => (wolf.x > best.x ? wolf : best), huntWolves[0]!);
   const target = nearest(predator, fallbackPrey);
   world.hunt = {
     predatorId: predator.id,
@@ -326,6 +350,7 @@ function startHunt(world: WildlifeWorld, preferredPrey: 'rabbit' | 'deer', macro
     phase: 'stalk',
     elapsed: 0,
     macroBacked,
+    successPlanned: macroBacked && plannedSuccess(target, consumedTick ?? Math.floor(world.time * 10)),
     consumedTick,
   };
   predator.targetId = target.id;
@@ -342,13 +367,14 @@ function updateHunt(world: WildlifeWorld, dt: number, predationEvent: PendingPre
   const prey = byId(world, hunt.preyId);
   if (!predator || !prey) {
     world.hunt = null;
-    world.nextHuntAt = world.time + 4;
+    world.nextHuntAt = world.time + 8;
     return;
   }
 
   hunt.elapsed += dt;
   if (predationEvent && hunt.phase === 'chase' && hunt.consumedTick !== predationEvent.tick && hunt.preyKind === predationEvent.preyKind) {
     hunt.macroBacked = true;
+    hunt.successPlanned ||= plannedSuccess(prey, predationEvent.tick);
     hunt.consumedTick = predationEvent.tick;
     world.pendingPredation = null;
   }
@@ -366,31 +392,38 @@ function updateHunt(world: WildlifeWorld, dt: number, predationEvent: PendingPre
     setActivity(prey, 'flee');
     chasePredator(predator, prey, dt);
     fleeFrom(prey, predator, dt);
-    if (hunt.macroBacked && dist < catchDistance(prey.kind)) {
+    if (hunt.successPlanned && dist < catchDistance(prey.kind)) {
       setHuntPhase(hunt, 'pounce', predator, prey);
-    } else if (hunt.elapsed > 3.6 || (!hunt.macroBacked && dist > 0.34 && hunt.elapsed > 2.2)) {
+    } else if (
+      (!hunt.successPlanned && hunt.elapsed > 3.6) ||
+      (hunt.successPlanned && hunt.elapsed > 6.8) ||
+      (!hunt.successPlanned && dist > 0.34 && hunt.elapsed > 2.2)
+    ) {
       setHuntPhase(hunt, 'escaped', predator, prey);
     }
   } else if (hunt.phase === 'pounce') {
     setActivity(predator, 'pounce');
     setActivity(prey, 'hide');
-    predator.vx *= 0.82;
-    predator.vy *= 0.82;
-    prey.vx *= 0.45;
-    prey.vy *= 0.45;
-    prey.opacity = approach(prey.opacity, 0, dt * 5);
-    if (hunt.elapsed > 0.65) {
+    predator.vx *= 0.72;
+    predator.vy *= 0.72;
+    steerTo(prey, coverEntryPoint(prey), dt, recoveryCoverSpeed(prey) * 1.15);
+    if (hunt.elapsed > 0.3) {
       setHuntPhase(hunt, 'feed', predator, prey);
     }
   } else if (hunt.phase === 'feed') {
     setActivity(predator, 'feed');
     setActivity(prey, 'hide');
-    predator.vx *= 0.7;
-    predator.vy *= 0.7;
-    prey.vx = 0;
-    prey.vy = 0;
+    predator.vx *= 0.82;
+    predator.vy *= 0.82;
+    // The visible end of a successful hunt is the prey disappearing into
+    // cover, not a slapstick collision in open ground. Give it enough speed
+    // to reach the grass and fade only after its body is actually sheltered.
+    steerTo(prey, coverEntryPoint(prey), dt, recoveryCoverSpeed(prey) * 1.8);
     prey.hiddenTime = hunt.elapsed;
-    if (hunt.elapsed > 2.4) {
+    if ((prey.cover ?? 0) > 0.36) {
+      prey.opacity = approach(prey.opacity, 0.01, dt * 18);
+    }
+    if (hunt.elapsed > 3.6) {
       setHuntPhase(hunt, 'recoverCaught', predator, prey);
     }
   } else if (hunt.phase === 'escaped') {
@@ -407,8 +440,11 @@ function updateHunt(world: WildlifeWorld, dt: number, predationEvent: PendingPre
     if (hunt.elapsed > 1.8) {
       predator.targetId = undefined;
       prey.targetId = undefined;
+      predator.goalX = predator.homeX ?? predator.x;
+      predator.goalY = predator.homeY ?? predator.y;
+      setActivity(predator, 'roam');
       world.hunt = null;
-      world.nextHuntAt = world.time + 5.5;
+      world.nextHuntAt = world.time + 10.5;
     }
   } else {
     setActivity(predator, 'rest');
@@ -426,8 +462,11 @@ function updateHunt(world: WildlifeWorld, dt: number, predationEvent: PendingPre
       prey.hiddenTime = 0;
       predator.targetId = undefined;
       prey.targetId = undefined;
+      predator.goalX = predator.homeX ?? predator.x;
+      predator.goalY = predator.homeY ?? predator.y;
+      setActivity(predator, 'roam');
       world.hunt = null;
-      world.nextHuntAt = world.time + 5;
+      world.nextHuntAt = world.time + 12;
     }
   }
 }
@@ -465,6 +504,24 @@ function updateAmbientAgent(world: WildlifeWorld, agent: WildlifeAgent, dt: numb
     agent.goalY = next.y;
   }
 
+  // The second representative is a quiet territory marker for the far end
+  // of the draggable panorama. Keep its random walk inside a compact home
+  // range so a long-running session cannot pull both members of a species
+  // into the same camera segment.
+  if (isPanoramaAnchor(agent) && agent.homeX !== undefined && agent.homeY !== undefined) {
+    const homeDistance = distance(agent.x, agent.y, agent.homeX, agent.homeY);
+    if (homeDistance > 0.075) {
+      agent.goalX = agent.homeX;
+      agent.goalY = agent.homeY;
+      // Do not teleport an anchor back into its range; a slow return keeps
+      // the same frame-to-frame movement bound as every other representative.
+      if (homeDistance > 0.11) {
+        agent.vx *= 0.25;
+        agent.vy *= 0.25;
+      }
+    }
+  }
+
   if (agent.activity === 'rest' || agent.activity === 'graze' || agent.activity === 'alert') {
     agent.vx *= Math.max(0, 1 - dt * 3.5);
     agent.vy *= Math.max(0, 1 - dt * 3.5);
@@ -490,7 +547,7 @@ function updateAmbientAgent(world: WildlifeWorld, agent: WildlifeAgent, dt: numb
 }
 
 function nearbyDanger(world: WildlifeWorld, agent: WildlifeAgent) {
-  if (agent.kind === 'wolf' || !world.hunt) return null;
+  if (agent.kind === 'wolf' || isPanoramaAnchor(agent) || !world.hunt) return null;
   if (world.hunt.preyId === agent.id) return null;
   if (!['chase', 'pounce', 'feed', 'recoverCaught', 'escaped'].includes(world.hunt.phase)) return null;
   const wolf = byId(world, world.hunt.predatorId);
@@ -502,14 +559,22 @@ function nearbyDanger(world: WildlifeWorld, agent: WildlifeAgent) {
 
 function chooseAmbientActivity(world: WildlifeWorld, agent: WildlifeAgent) {
   const roll = hash(agent.seed ?? 1, Math.floor(world.time * 1.7) + Math.floor(agent.phase * 10));
+  const anchor = isPanoramaAnchor(agent);
   if (agent.kind === 'wolf') {
     const activity: WildlifeActivity = roll > 0.72 ? 'rest' : roll > 0.5 ? 'alert' : 'roam';
-    return { activity, ...randomWalkable(agent.seed ?? 1, world.time, agent.homeX ?? agent.x, agent.homeY ?? agent.y, 0.23) };
+    // Lamar wolves patrol an established territory around the forest edge;
+    // keeping ambient goals near their home range prevents the whole pack
+    // from drifting out of a wide panorama after a hunt.
+    return { activity, ...randomWalkable(agent.seed ?? 1, world.time, agent.homeX ?? agent.x, agent.homeY ?? agent.y, anchor ? 0.075 : 0.14) };
   }
-  if (roll > 0.82) return { activity: 'drink' as const, ...riverEdgePoint(agent.seed ?? 1, world.time) };
-  if (roll > 0.58) return { activity: 'graze' as const, ...randomWalkable(agent.seed ?? 1, world.time, agent.homeX ?? agent.x, agent.homeY ?? agent.y, 0.18) };
-  if (roll > 0.24) return { activity: 'roam' as const, ...randomWalkable(agent.seed ?? 1, world.time, agent.homeX ?? agent.x, agent.homeY ?? agent.y, 0.22) };
+  if (!anchor && roll > 0.82) return { activity: 'drink' as const, ...riverEdgePoint(agent.seed ?? 1, world.time) };
+  if (roll > 0.58) return { activity: 'graze' as const, ...randomWalkable(agent.seed ?? 1, world.time, agent.homeX ?? agent.x, agent.homeY ?? agent.y, anchor ? 0.08 : 0.16) };
+  if (roll > 0.24) return { activity: 'roam' as const, ...randomWalkable(agent.seed ?? 1, world.time, agent.homeX ?? agent.x, agent.homeY ?? agent.y, anchor ? 0.09 : 0.18) };
   return { activity: roll > 0.12 ? ('rest' as const) : ('alert' as const), x: agent.x, y: agent.y };
+}
+
+function isPanoramaAnchor(agent: WildlifeAgent) {
+  return agent.id.endsWith('-2');
 }
 
 function setActivity(agent: WildlifeAgent, activity: WildlifeActivity) {
@@ -573,9 +638,27 @@ function steerTo(agent: WildlifeAgent, goal: { x: number; y: number }, dt: numbe
   const dx = clipped.x - agent.x;
   const dy = clipped.y - agent.y;
   const len = Math.hypot(dx, dy);
-  const targetVx = len > 0.006 ? (dx / len) * speed : 0;
-  const targetVy = len > 0.006 ? (dy / len) * speed : 0;
+  if (len <= 0.006) {
+    agent.vx = approach(agent.vx, 0, dt * 0.9);
+    agent.vy = approach(agent.vy, 0, dt * 0.9);
+    return;
+  }
+
+  const desiredHeading = Math.atan2(dy, dx);
+  agent.targetHeading = desiredHeading;
+  const currentSpeed = Math.hypot(agent.vx, agent.vy);
+  const headingError = Math.abs(angleDelta(agent.heading, desiredHeading));
+  const movingBackwards = currentSpeed > 0.018 && headingError > Math.PI * 0.62;
+  const turnRate = speed > 0.14 ? 3.4 : speed > 0.05 ? 2.45 : 1.8;
+  agent.heading = rotateTowards(agent.heading, desiredHeading, turnRate * dt);
+
+  // Animals shed speed before turning through a tight angle, then rebuild it
+  // along the new heading. This avoids instant sideways flips and jitter.
+  const alignment = clamp(Math.cos(angleDelta(agent.heading, desiredHeading)), 0, 1);
+  const targetSpeed = speed * (movingBackwards ? 0.2 : 0.35 + alignment * 0.65);
   const accel = speed > 0.14 ? 5.5 : 3.2;
+  const targetVx = Math.cos(agent.heading) * targetSpeed;
+  const targetVy = Math.sin(agent.heading) * targetSpeed;
   agent.vx = approach(agent.vx, targetVx, accel * dt * speed);
   agent.vy = approach(agent.vy, targetVy, accel * dt * speed);
 }
@@ -608,7 +691,14 @@ function integrate(agent: WildlifeAgent, dt: number) {
   agent.distance += moved;
   agent.gait += moved * gaitScale(agent.kind, agent.activity);
   agent.phase += dt;
-  if (Math.abs(agent.vx) > 0.002) agent.facing = agent.vx >= 0 ? 1 : -1;
+  const movedSpeed = Math.hypot(agent.vx, agent.vy);
+  if (movedSpeed > 0.002) {
+    const velocityHeading = Math.atan2(agent.vy, agent.vx);
+    agent.heading = rotateTowards(agent.heading, velocityHeading, 4.5 * dt);
+  }
+  const facingBoundary = Math.PI * 0.5 + 0.14;
+  if (agent.facing === 1 && Math.abs(angleDelta(agent.heading, 0)) > facingBoundary) agent.facing = -1;
+  if (agent.facing === -1 && Math.abs(angleDelta(agent.heading, Math.PI)) > facingBoundary) agent.facing = 1;
   agent.cover = approach(agent.cover ?? 0, coverDepth(agent.x, agent.y), dt * 3.5);
   agent.coverId = nearestCoverPatch(agent.x, agent.y)?.id;
 }
@@ -699,14 +789,14 @@ function updateObservation(world: WildlifeWorld) {
     };
   } else if (world.hunt.phase === 'pounce' || world.hunt.phase === 'feed') {
     world.observation = {
-      text: '灰狼短扑后停下进食，附近的动物逐渐散开。',
+      text: '追逐在高草边缘短暂交错，猎物被草丛遮住，灰狼停在林缘观察。',
       phase: 'caught',
       predatorId: world.hunt.predatorId,
       preyId: world.hunt.preyId,
     };
   } else if (world.hunt.phase === 'recoverCaught') {
     world.observation = {
-      text: '灰狼停下休息，附近的动物逐渐散开。',
+      text: '草丛遮住了追逐的后半段，灰狼放慢脚步，河谷重新安静。',
       phase: 'caught',
       predatorId: world.hunt.predatorId,
       preyId: world.hunt.preyId,
@@ -818,6 +908,25 @@ function ambientDuration(agent: WildlifeAgent) {
 
 function catchDistance(kind: WildlifeKind) {
   return kind === 'deer' ? 0.045 : 0.038;
+}
+
+function plannedSuccess(prey: WildlifeAgent | undefined, tick: number) {
+  if (!prey) return false;
+  // Keep the first observed macro event legible, then make successful hunts
+  // uncommon so most encounters resolve with a retreat into cover.
+  return tick <= 1 || hash(prey.seed ?? 1, tick) > 0.96;
+}
+
+function angleDelta(from: number, to: number) {
+  let delta = (to - from + Math.PI) % (Math.PI * 2);
+  if (delta < 0) delta += Math.PI * 2;
+  return delta - Math.PI;
+}
+
+function rotateTowards(from: number, to: number, amount: number) {
+  const delta = angleDelta(from, to);
+  if (Math.abs(delta) <= amount) return to;
+  return from + Math.sign(delta) * amount;
 }
 
 function coverEntryPoint(agent: WildlifeAgent) {

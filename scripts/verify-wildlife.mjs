@@ -55,6 +55,8 @@ function snapshot(world) {
     y: Number(a.y.toFixed(6)),
     vx: Number(a.vx.toFixed(6)),
     vy: Number(a.vy.toFixed(6)),
+    heading: Number(a.heading.toFixed(6)),
+    targetHeading: Number(a.targetHeading.toFixed(6)),
     activity: a.activity,
     activityTime: Number(a.activityTime.toFixed(6)),
     gait: Number(a.gait.toFixed(6)),
@@ -339,13 +341,16 @@ function forceRecoverCaught(kind, position) {
   const phases = new Set();
   const consumedTicks = new Set();
   const caughtStarts = [];
+  const escapedStarts = [];
   const huntStarts = [];
   const quietIntervals = [];
   const startById = new Map(world.agents.map((a) => [a.id, { x: a.x, y: a.y }]));
   const minOpacityByPrey = new Map();
   let previousById = new Map(world.agents.map((a) => [a.id, { x: a.x, y: a.y }]));
+  let previousHeadingById = new Map(world.agents.map((a) => [a.id, a.heading]));
   let previousOpacityById = new Map(world.agents.map((a) => [a.id, a.opacity]));
   let maxJump = 0;
+  let maxHeadingStep = 0;
   let firstSuccessfulHuntAt = null;
   let nextEventAt = 1.8;
   let previousHuntId = null;
@@ -379,11 +384,18 @@ function forceRecoverCaught(kind, position) {
       if (world.hunt.phase === 'pounce' && firstSuccessfulHuntAt == null) firstSuccessfulHuntAt = t;
     }
     if (world.observation.phase === 'caught' && caughtStarts.at(-1) !== huntId) caughtStarts.push(huntId);
+    if (world.observation.phase === 'escaped' && escapedStarts.at(-1) !== huntId) escapedStarts.push(huntId);
 
     for (const a of world.agents) {
       const prev = previousById.get(a.id);
       if (prev) maxJump = Math.max(maxJump, Math.hypot(a.x - prev.x, a.y - prev.y));
       previousById.set(a.id, { x: a.x, y: a.y });
+      const previousHeading = previousHeadingById.get(a.id);
+      if (previousHeading != null) {
+        const headingStep = Math.abs(Math.atan2(Math.sin(a.heading - previousHeading), Math.cos(a.heading - previousHeading)));
+        maxHeadingStep = Math.max(maxHeadingStep, headingStep);
+      }
+      previousHeadingById.set(a.id, a.heading);
       const previousOpacity = previousOpacityById.get(a.id) ?? a.opacity;
       if (a.opacity > previousOpacity + 1e-6 && previousOpacity < 0.98) {
         assert((a.cover ?? 0) > 0.55, `${a.id} only regains opacity inside cover at ${t.toFixed(2)}s`);
@@ -407,9 +419,11 @@ function forceRecoverCaught(kind, position) {
   assert(phases.has('pounce'), 'long run observes pounce');
   assert(phases.has('feed'), 'long run observes feed');
   assert(caughtCount >= 1, 'long run records a real caught sequence');
+  assert(escapedStarts.filter(Boolean).length > caughtCount, 'most long-run encounters resolve as escapes');
   assert([...minOpacityByPrey.values()].some((v) => v <= 0.02), 'caught prey becomes visually hidden');
   assert(maxDisplacement > 0.05, 'long run has meaningful position displacement');
   assert(maxJump <= 0.32 / 60 + 0.001, `per-frame jump ${maxJump} stays below speed bound`);
+  assert(maxHeadingStep <= 0.14, `heading changes continuously with bounded turn rate (${maxHeadingStep.toFixed(5)} rad/frame)`);
   assert(quietIntervals.some((seconds) => seconds >= 4), 'cooldown preserves at least four seconds of quiet between hunts');
   assert.equal(maxActiveHunts, 1, 'simulation never creates overlapping hunts');
   assert(consumedTicks.size >= caughtCount, 'successful catches consume distinct macro ticks');

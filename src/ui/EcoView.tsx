@@ -60,7 +60,7 @@ export function EcoView({ state, onBack, onOpenCascade, hasCascade, onTogglePaus
         })}
       </div>
       <PredationAnimation observation={observation} paused={state.paused} />
-      <p className="scene-caption">观察它们觅食、追逐与休息 · 点选动物查看当前行为。画面展示代表个体。</p>
+      <p className="scene-caption">拖动画面探索拉马谷 · 点选动物查看当前行为。场景中的动物代表其种群。</p>
       <SpeciesPanel state={state} />
       <div className="eco-bottom">
         <PopulationChart history={state.history} />

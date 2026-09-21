@@ -4,7 +4,12 @@ import { clampState } from './bounds';
 import { appendHistory, pushLog } from './state';
 import { tickCascades } from './cascade';
 
-const TICKS_PER_SEASON = 8;
+// The UI advances one macro tick every 1.8 seconds. Keeping a season on the
+// screen for roughly a minute and a half lets a camera pan read as one place
+// with one light state; explicit fast-forward commands can still move the
+// calendar quickly when the user asks for it.
+export const TICKS_PER_SEASON = 48;
+const PREDATION_REPORT_INTERVAL = 6;
 
 /** 季节基准温度与降雨 */
 const SEASON_CLIMATE: Record<Season, { temp: number; rain: number }> = {
@@ -113,7 +118,11 @@ export function tick(state: EcosystemState): EcosystemState {
   const wolfBirth = s.wolves * 0.02 * Math.min(1.2, wolfFood);
   const wolfStarve = s.wolves * 0.03 * Math.max(0, 1 - wolfFood);
 
-  const predationHappened = rabbitKilled >= 1 || elkKilled >= 0.5;
+  // Population pressure is continuous, but a visible field observation is a
+  // sampled event. Reporting every background consumption step made the log
+  // and animation look like an endless slapstick chase.
+  const predationHappened = (rabbitKilled >= 1 || elkKilled >= 0.5)
+    && s.tick % PREDATION_REPORT_INTERVAL === 0;
   let lastPredation: EcosystemState['lastPredation'] = null;
   if (predationHappened) {
     if (rabbitKilled >= elkKilled) {
@@ -136,7 +145,7 @@ export function tick(state: EcosystemState): EcosystemState {
     s = pushLog(
       s,
       'predation',
-      `河岸猎场：狼群捕得约 ${lastPredation.amount} 只${preyLabel}，草食动物明显警觉。`,
+      `河岸猎场：远处记录到一次狼群捕食；约 ${lastPredation.amount} 只${preyLabel}计入食物链消耗，近旁草食动物随即拉开距离。`,
     );
   }
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type WheelEvent } from 'react';
 import type { EcosystemState } from '../sim/types';
 import {
   createWildlifeWorld,
@@ -21,23 +21,21 @@ import {
   type EcosystemAnimal,
   type EcosystemManifest,
   type SheetMeta,
-  type SceneLayerKey,
   type ScenePropMeta,
+  type SceneLayerKey,
 } from '../assetsPaths';
 import {
   CLOUDS,
   cloudPosition,
   fishPosition,
   drawFish as drawSceneFish,
-  drawLivingSky,
-  FALLBACK_FISH_ROUTES,
-  fitFishRoutes,
   advanceSeasonVisual,
   approachVisual,
   rgba,
   seasonPaletteAt,
   seasonPosition,
   type FishRoute,
+  type SeasonPalette,
 } from './sceneEnvironment';
 
 interface Props {
@@ -100,7 +98,598 @@ interface TooltipInfo {
 }
 
 const PLANT_CAP = { trees: 10, shrubs: 14, grass: 20 } as const;
-const FRAME_HEIGHT = { rabbit: 38, deer: 94, wolf: 72 } as const;
+const WORLD_WIDTH_FACTOR = 2.4;
+// Keep the representatives readable at the viewport size while preserving
+// the distance cue from the valley artwork. The previous sizes made the
+// foreground elk and wolf dominate the landscape when the camera reached the
+// right side of the panorama.
+const FRAME_HEIGHT = { rabbit: 38, deer: 96, wolf: 72 } as const;
+
+const PANORAMA_FISH_ROUTES: readonly FishRoute[] = [
+  // These routes follow the shared full-world river profile instead of the
+  // source panel's mirrored exits, keeping the fish inside the water on every
+  // camera segment.
+  { x: 0.25, y: 0.84, rx: 0.022, ry: 0.009, phase: 0.3, speed: 0.2, size: 0.009 },
+  { x: 0.31, y: 0.78, rx: 0.024, ry: 0.008, phase: 2.1, speed: 0.23, size: 0.008 },
+  { x: 0.4, y: 0.70, rx: 0.022, ry: 0.007, phase: 4.2, speed: 0.19, size: 0.009 },
+  { x: 0.61, y: 0.69, rx: 0.022, ry: 0.007, phase: 1.4, speed: 0.24, size: 0.008 },
+  { x: 0.7, y: 0.71, rx: 0.024, ry: 0.008, phase: 3.5, speed: 0.2, size: 0.009 },
+  { x: 0.76, y: 0.72, rx: 0.022, ry: 0.009, phase: 5.1, speed: 0.22, size: 0.008 },
+] as const;
+
+/**
+ * The generated art pack is a 2048×1152 scene panel. Mirroring two panels
+ * gives the camera a 2.4-viewport Lamar Valley without stretching the trees or
+ * flattening the river's perspective. The join is at the river's foreground
+ * exit, so it reads as one continuous bend while the camera pans.
+ */
+function drawMirroredPanoramaLayer(
+  ctx: CanvasRenderingContext2D,
+  image: HTMLImageElement | undefined,
+  worldW: number,
+  h: number,
+  alpha = 1,
+  maxY = h,
+) {
+  if (!image || image.naturalWidth <= 0 || image.naturalHeight <= 0) return false;
+  const panelW = worldW / 2;
+  // The source art is a single panel whose river exits at the right edge.
+  // Mirroring it at the edge preserves the exit direction, but the edge
+  // pixels still need a broad crossfade so the mountain and bank contours
+  // do not form a vertical cut at the join.
+  const seamOverlap = Math.min(panelW * 0.085, 76);
+  const drawMirroredPanel = () => {
+    ctx.save();
+    ctx.translate(worldW, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(image, 0, 0, image.naturalWidth, image.naturalHeight, 0, 0, panelW, h);
+    ctx.restore();
+  };
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, worldW, maxY);
+  ctx.clip();
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(image, 0, 0, image.naturalWidth, image.naturalHeight, 0, 0, panelW, h);
+  // The mirrored panel shares a river exit with the first panel. A short
+  // feather at the join hides a one-pixel bank/grass discontinuity without
+  // blurring the rest of the landscape or stretching the source art.
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(panelW + seamOverlap, 0, panelW, maxY);
+  ctx.clip();
+  drawMirroredPanel();
+  ctx.restore();
+  const strips = 16;
+  for (let i = 0; i < strips; i++) {
+    const left = panelW - seamOverlap + (i * seamOverlap * 2) / strips;
+    const width = (seamOverlap * 2) / strips + 0.5;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(left, 0, width, maxY);
+    ctx.clip();
+    const progress = (i + 1) / strips;
+    ctx.globalAlpha = alpha * smoothstep(progress);
+    drawMirroredPanel();
+    ctx.restore();
+  }
+  ctx.restore();
+  return true;
+}
+
+function riverProfileAt(unitX: number) {
+  // A broad, unequal S curve gives the valley a real downstream route. The
+  // two low-frequency bends are shared by the banks, highlights and fish, so
+  // every camera position sees the same river instead of a mirrored copy.
+  const primaryBend = Math.sin(unitX * Math.PI * 2.15 + 0.55) * 0.085;
+  const secondaryBend = Math.sin(unitX * Math.PI * 4.4 - 0.25) * 0.02;
+  const recedingTurn = -Math.exp(-Math.pow((unitX - 0.47) / 0.18, 2)) * 0.07;
+  // A short floodplain bend near the middle of the panorama widens the
+  // channel before it narrows again. The slow envelope keeps the change
+  // organic instead of making the river read as two parallel rails.
+  const floodplainBend = Math.exp(-Math.pow((unitX - 0.53) / 0.095, 2)) * 0.028;
+  const center = 0.79 + primaryBend + secondaryBend + recedingTurn;
+  const halfWidth = 0.017 + Math.max(0, center - 0.68) * 0.12 + floodplainBend;
+  return { center, halfWidth };
+}
+
+function riverBankVariation(unitX: number) {
+  // Low-frequency bank movement reads as shallow coves and gravel shelves;
+  // keeping it deterministic keeps the river, highlights, and fish aligned.
+  return (
+    Math.sin(unitX * Math.PI * 5.6 + 0.8) * 0.32 +
+    Math.sin(unitX * Math.PI * 9.2) * 0.12
+  );
+}
+
+function riverBankCove(unitX: number) {
+  return (
+    Math.sin(unitX * Math.PI * 3.15 - 0.65) * 0.014 +
+    Math.sin(unitX * Math.PI * 7.4 + 0.25) * 0.005
+  );
+}
+
+function traceRiverRibbon(ctx: CanvasRenderingContext2D, w: number, h: number, widthScale = 1) {
+  const samples = 96;
+  ctx.beginPath();
+  for (let i = 0; i <= samples; i++) {
+    const unitX = i / samples;
+    const profile = riverProfileAt(unitX);
+    const x = unitX * w;
+    const y = (profile.center - profile.halfWidth * widthScale) * h;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  for (let i = samples; i >= 0; i--) {
+    const unitX = i / samples;
+    const profile = riverProfileAt(unitX);
+    ctx.lineTo(unitX * w, (profile.center + profile.halfWidth * widthScale) * h);
+  }
+  ctx.closePath();
+}
+
+function traceRiverRibbonAsymmetric(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  upperScale = 1,
+  lowerScale = 1,
+) {
+  const samples = 96;
+  ctx.beginPath();
+  for (let i = 0; i <= samples; i++) {
+    const unitX = i / samples;
+    const profile = riverProfileAt(unitX);
+    // A real valley stream has alternating shallow shelves and small coves;
+    // let the two banks breathe independently instead of drawing parallel
+    // rails around the water.
+    const variation = riverBankVariation(unitX);
+    const cove = riverBankCove(unitX);
+    const localUpper = upperScale * (1 + variation);
+    const x = unitX * w;
+    const y = (profile.center - profile.halfWidth * localUpper + cove) * h;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  for (let i = samples; i >= 0; i--) {
+    const unitX = i / samples;
+    const profile = riverProfileAt(unitX);
+    const variation = riverBankVariation(unitX);
+    const cove = riverBankCove(unitX);
+    const localLower = lowerScale * (1 - variation * 0.7);
+    ctx.lineTo(unitX * w, (profile.center + profile.halfWidth * localLower + cove * 0.6) * h);
+  }
+  ctx.closePath();
+}
+
+function traceRiverCenter(ctx: CanvasRenderingContext2D, w: number, h: number, offset = 0) {
+  const samples = 96;
+  ctx.beginPath();
+  for (let i = 0; i <= samples; i++) {
+    const unitX = i / samples;
+    const profile = riverProfileAt(unitX);
+    const x = unitX * w;
+    const y = (profile.center + profile.halfWidth * offset) * h;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+}
+
+/**
+ * The supplied river artwork is composed as a single portrait-like panel.
+ * Mirroring that panel makes a pleasing still image, but it reverses the
+ * river's bend at the panorama join. Draw a quiet hand-painted ribbon across
+ * the whole world instead so the water, banks and fish follow one continuous
+ * downstream path while the generated meadow and foreground art remain in
+ * the same visual language.
+ */
+function drawContinuousGeneratedRiver(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  elapsed: number,
+) {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+
+  traceRiverRibbonAsymmetric(ctx, w, h, 1.28, 1.62);
+  ctx.fillStyle = '#c6b58a';
+  ctx.fill();
+  ctx.strokeStyle = '#4f6f70';
+  ctx.lineWidth = Math.max(1.2, h * 0.0034);
+  ctx.stroke();
+
+  // Two shallow backwaters break the long ribbon at different depths. They
+  // are deliberately short and low contrast: the eye reads them as wetland
+  // pockets connected to the main stream, not as a second canal.
+  for (const [unitX, side, depthScale] of [
+    [0.37, -1, 0.72],
+    [0.61, 1, 0.58],
+    [0.79, -1, 0.46],
+  ] as const) {
+    const profile = riverProfileAt(unitX);
+    const variation = riverBankVariation(unitX);
+    const cove = riverBankCove(unitX);
+    const edge = side < 0
+      ? profile.center - profile.halfWidth * 1.28 * (1 + variation) + cove
+      : profile.center + profile.halfWidth * 1.62 * (1 - variation * 0.7) + cove * 0.6;
+    const x = unitX * w;
+    const y = edge * h;
+    const span = Math.max(18, w * 0.055);
+    const depth = h * 0.055 * depthScale;
+    ctx.save();
+    ctx.fillStyle = 'rgba(102,164,157,.32)';
+    ctx.strokeStyle = 'rgba(57,103,96,.38)';
+    ctx.lineWidth = Math.max(0.8, h * 0.0018);
+    ctx.beginPath();
+    ctx.moveTo(x - span * 0.48, y + side * h * 0.002);
+    ctx.quadraticCurveTo(x - span * 0.12, y + side * depth * 0.42, x + span * 0.5, y + side * depth * 0.72);
+    ctx.quadraticCurveTo(x + span * 0.28, y + side * depth, x - span * 0.22, y + side * depth * 0.86);
+    ctx.quadraticCurveTo(x - span * 0.58, y + side * depth * 0.5, x - span * 0.48, y + side * h * 0.002);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  traceRiverRibbonAsymmetric(ctx, w, h, 0.9, 1.04);
+  const water = ctx.createLinearGradient(0, h * 0.66, 0, h * 0.98);
+  water.addColorStop(0, '#92cdd0');
+  water.addColorStop(0.52, '#6cb7c3');
+  water.addColorStop(1, '#4a96aa');
+  ctx.fillStyle = water;
+  ctx.fill();
+  ctx.strokeStyle = '#355f70';
+  ctx.lineWidth = Math.max(1, h * 0.0027);
+  ctx.stroke();
+
+  // A visible side channel at the floodplain bend gives the river a natural
+  // recessed bank. It joins the main water with a narrow neck, then opens into
+  // a shallow, stone-edged pool; this remains part of the same water system as
+  // the main ribbon rather than a decorative second stream.
+  {
+    const unitX = 0.53;
+    const profile = riverProfileAt(unitX);
+    const variation = riverBankVariation(unitX);
+    const cove = riverBankCove(unitX);
+    const edge = (profile.center - profile.halfWidth * 0.98 * (1 + variation)) * h + cove * h;
+    const x = unitX * w;
+    const neck = Math.max(14, w * 0.018);
+    const reach = Math.max(38, w * 0.082);
+    const depth = h * 0.068;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x - neck * 0.62, edge + h * 0.006);
+    ctx.bezierCurveTo(
+      x - neck * 0.18, edge - depth * 0.18,
+      x - reach * 0.22, edge - depth * 0.52,
+      x - reach * 0.72, edge - depth * 0.62,
+    );
+    ctx.bezierCurveTo(
+      x - reach * 0.95, edge - depth * 0.67,
+      x - reach * 0.96, edge - depth * 0.94,
+      x - reach * 0.68, edge - depth,
+    );
+    ctx.bezierCurveTo(
+      x - reach * 0.35, edge - depth * 1.02,
+      x - reach * 0.08, edge - depth * 0.86,
+      x + neck * 0.7, edge - depth * 0.24,
+    );
+    ctx.quadraticCurveTo(x + neck * 0.84, edge - depth * 0.02, x + neck * 0.54, edge + h * 0.006);
+    ctx.closePath();
+    const backwater = ctx.createLinearGradient(x, edge - depth, x, edge);
+    backwater.addColorStop(0, '#78b5b8');
+    backwater.addColorStop(1, '#61a8b1');
+    ctx.fillStyle = backwater;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(53,95,92,.72)';
+    ctx.lineWidth = Math.max(1, h * 0.0023);
+    ctx.stroke();
+
+    // Exposed gravel on the inside of the bend helps sell the shallow shelf.
+    ctx.fillStyle = 'rgba(164,151,111,.86)';
+    for (let i = 0; i < 7; i++) {
+      const stoneX = x - reach * (0.22 + i * 0.105);
+      const stoneY = edge - depth * (0.9 + Math.sin(i * 1.7) * 0.035);
+      const stoneR = Math.max(1.8, h * (0.004 + (i % 3) * 0.0014));
+      ctx.beginPath();
+      ctx.ellipse(stoneX, stoneY, stoneR * 1.65, stoneR * 0.72, -0.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // Long, low-contrast highlights make the current read as flowing in one
+  // direction instead of as a repeated static texture.
+  for (const offset of [-0.38, 0.16]) {
+    traceRiverCenter(ctx, w, h, offset);
+    ctx.strokeStyle = 'rgba(244,246,220,.46)';
+    ctx.lineWidth = Math.max(0.75, h * 0.0019);
+    ctx.stroke();
+  }
+
+  // Sparse bank texture: a few exposed stones, shallow bars, and reed clumps
+  // keep the waterline irregular without turning the stream into decoration.
+  ctx.save();
+  ctx.lineCap = 'round';
+  for (let i = 0; i < 13; i++) {
+    const unitX = 0.035 + seeded(i, 931) * 0.93;
+    const profile = riverProfileAt(unitX);
+    const variation = riverBankVariation(unitX);
+    const cove = riverBankCove(unitX);
+    const upperEdge = profile.center - profile.halfWidth * 1.28 * (1 + variation) + cove;
+    const lowerEdge = profile.center + profile.halfWidth * 1.62 * (1 - variation * 0.7) + cove * 0.6;
+    const side = i % 2 === 0 ? -1 : 1;
+    const edge = side < 0 ? upperEdge : lowerEdge;
+    const x = unitX * w;
+    const y = edge * h + side * h * (0.003 + seeded(i, 932) * 0.009);
+    const radius = Math.max(2, h * (0.004 + seeded(i, 933) * 0.008));
+    ctx.fillStyle = i % 3 === 0 ? 'rgba(89,107,100,.5)' : 'rgba(119,128,112,.4)';
+    ctx.beginPath();
+    ctx.ellipse(x, y, radius * (1.25 + seeded(i, 934) * 0.75), radius * 0.58, seeded(i, 935) * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+    if (i % 3 === 1) {
+      ctx.strokeStyle = 'rgba(84,126,107,.5)';
+      ctx.lineWidth = Math.max(0.7, h * 0.0012);
+      for (let reed = 0; reed < 3; reed++) {
+        const rx = x + (reed - 1) * radius * 0.72;
+        ctx.beginPath();
+        ctx.moveTo(rx, y + side * radius * 0.2);
+        ctx.quadraticCurveTo(rx - side * radius * 0.5, y - h * 0.012, rx + side * radius * 0.18, y - h * 0.025);
+        ctx.stroke();
+      }
+    }
+  }
+  // Dark, broken shoreline shadows make the waterline legible as a set of
+  // coves and shallow shelves rather than two continuous drawn rails.
+  ctx.strokeStyle = 'rgba(56,92,84,.36)';
+  ctx.lineWidth = Math.max(1, h * 0.0032);
+  for (let i = 0; i < 11; i++) {
+    const unitX = 0.04 + seeded(i, 941) * 0.9;
+    const profile = riverProfileAt(unitX);
+    const variation = riverBankVariation(unitX);
+    const cove = riverBankCove(unitX);
+    const side = i % 2 === 0 ? -1 : 1;
+    const edge = side < 0
+      ? profile.center - profile.halfWidth * 1.28 * (1 + variation) + cove
+      : profile.center + profile.halfWidth * 1.62 * (1 - variation * 0.7) + cove * 0.6;
+    const x = unitX * w;
+    const span = Math.max(10, w * (0.012 + seeded(i, 942) * 0.018));
+    const depth = h * (0.006 + seeded(i, 943) * 0.012);
+    ctx.beginPath();
+    ctx.moveTo(x - span, edge * h + side * depth * 0.25);
+    ctx.quadraticCurveTo(x - span * 0.2, edge * h + side * depth * 1.3, x + span * 0.55, edge * h + side * depth * 0.72);
+    ctx.quadraticCurveTo(x + span * 0.9, edge * h + side * depth * 0.35, x + span, edge * h + side * depth * 0.15);
+    ctx.stroke();
+  }
+  ctx.restore();
+  ctx.save();
+  traceRiverRibbonAsymmetric(ctx, w, h, 0.88, 1.02);
+  ctx.clip();
+  ctx.strokeStyle = 'rgba(255,255,255,.28)';
+  ctx.lineWidth = Math.max(0.7, h * 0.0015);
+  for (let i = 0; i < 26; i++) {
+    const unitX = (seeded(i, 921) + elapsed * (0.0011 + (i % 4) * 0.0003)) % 1;
+    const profile = riverProfileAt(unitX);
+    const x = unitX * w;
+    const y = (profile.center + (seeded(i, 922) - 0.5) * profile.halfWidth * 1.25) * h;
+    const length = Math.max(7, w * (0.004 + seeded(i, 923) * 0.006));
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.quadraticCurveTo(x + length * 0.45, y - h * 0.002, x + length, y);
+    ctx.stroke();
+  }
+  ctx.restore();
+  ctx.restore();
+}
+
+function drawDistantPine(ctx: CanvasRenderingContext2D, x: number, groundY: number, height: number, alpha: number) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = '#416b69';
+  ctx.beginPath();
+  ctx.moveTo(x, groundY - height);
+  ctx.lineTo(x - height * 0.24, groundY - height * 0.3);
+  ctx.lineTo(x - height * 0.1, groundY - height * 0.34);
+  ctx.lineTo(x - height * 0.3, groundY);
+  ctx.lineTo(x + height * 0.3, groundY);
+  ctx.lineTo(x + height * 0.1, groundY - height * 0.34);
+  ctx.lineTo(x + height * 0.24, groundY - height * 0.3);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawLamarLandscape(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  palette: SeasonPalette,
+  grassAmount: number,
+  visualFire: number,
+) {
+  const outline = '#31536a';
+
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+
+  // Blue-gray Absaroka ridges stay distant so the valley reads as broad rather
+  // than as a wall of close conifers.
+  ctx.beginPath();
+  ctx.moveTo(0, h * 0.48);
+  for (let i = 0; i <= 84; i++) {
+    const unitX = i / 84;
+    const ridge = 0.37
+      + Math.sin(unitX * Math.PI * 4.1 + 0.4) * 0.045
+      + Math.sin(unitX * Math.PI * 10.7) * 0.018
+      - Math.exp(-Math.pow((unitX - 0.57) / 0.09, 2)) * 0.12;
+    ctx.lineTo(unitX * w, ridge * h);
+  }
+  ctx.lineTo(w, h * 0.57);
+  ctx.lineTo(0, h * 0.57);
+  ctx.closePath();
+  ctx.fillStyle = '#92aeb7';
+  ctx.fill();
+  ctx.strokeStyle = outline;
+  ctx.lineWidth = Math.max(1.4, h * 0.0042);
+  ctx.globalAlpha = 0.9;
+  ctx.stroke();
+
+  // Broad, low-contrast facets give the ridges the hand-painted volume seen
+  // in Yellowstone valley illustrations without turning them into a close
+  // mountain wall.
+  const facets = [
+    { x: 0.18, peak: 0.285, spread: 0.11 },
+    { x: 0.47, peak: 0.31, spread: 0.14 },
+    { x: 0.68, peak: 0.295, spread: 0.12 },
+    { x: 0.87, peak: 0.325, spread: 0.1 },
+  ] as const;
+  for (const facet of facets) {
+    const base = 0.43;
+    ctx.fillStyle = 'rgba(211,228,229,.44)';
+    ctx.beginPath();
+    ctx.moveTo((facet.x - facet.spread) * w, base * h);
+    ctx.lineTo(facet.x * w, facet.peak * h);
+    ctx.lineTo((facet.x + facet.spread * 0.72) * w, base * h);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = 'rgba(67,105,120,.16)';
+    ctx.beginPath();
+    ctx.moveTo(facet.x * w, facet.peak * h);
+    ctx.lineTo((facet.x + facet.spread * 0.72) * w, base * h);
+    ctx.lineTo((facet.x + facet.spread * 0.2) * w, base * h);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  ctx.beginPath();
+  ctx.moveTo(0, h * 0.53);
+  for (let i = 0; i <= 72; i++) {
+    const unitX = i / 72;
+    const foothill = 0.48
+      + Math.sin(unitX * Math.PI * 3.2 + 1.5) * 0.035
+      + Math.sin(unitX * Math.PI * 8.4) * 0.012;
+    ctx.lineTo(unitX * w, foothill * h);
+  }
+  ctx.lineTo(w, h * 0.63);
+  ctx.lineTo(0, h * 0.63);
+  ctx.closePath();
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#789c8d';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(47,78,79,.72)';
+  ctx.lineWidth = Math.max(1, h * 0.0028);
+  ctx.stroke();
+
+  // A sparse conifer line anchors the foothills without enclosing the meadow.
+  for (let i = 0; i < 54; i++) {
+    if (seeded(i, 811) < 0.42) continue;
+    const unitX = (i + seeded(i, 812) * 0.7) / 54;
+    const cluster = Math.max(
+      Math.exp(-Math.pow((unitX - 0.08) / 0.11, 2)),
+      Math.exp(-Math.pow((unitX - 0.42) / 0.08, 2)) * 0.7,
+      Math.exp(-Math.pow((unitX - 0.89) / 0.1, 2)),
+    );
+    if (seeded(i, 813) > 0.25 + cluster * 0.75) continue;
+    drawDistantPine(
+      ctx,
+      unitX * w,
+      h * (0.555 + seeded(i, 814) * 0.018),
+      h * (0.045 + seeded(i, 815) * 0.045),
+      0.36 + cluster * 0.34,
+    );
+  }
+
+  ctx.fillStyle = rgba(palette.near);
+  ctx.fillRect(0, h * 0.555, w, h * 0.445);
+
+  for (let band = 0; band < 3; band++) {
+    ctx.beginPath();
+    ctx.moveTo(0, h * (0.62 + band * 0.075));
+    for (let i = 0; i <= 60; i++) {
+      const unitX = i / 60;
+      const y = 0.62 + band * 0.075
+        + Math.sin(unitX * Math.PI * (3.4 + band * 0.7) + band) * 0.012
+        + Math.sin(unitX * Math.PI * 9.1) * 0.004;
+      ctx.lineTo(unitX * w, y * h);
+    }
+    ctx.lineTo(w, h * (0.69 + band * 0.075));
+    ctx.lineTo(0, h * (0.69 + band * 0.075));
+    ctx.closePath();
+    ctx.fillStyle = band % 2 === 0 ? 'rgba(226,231,175,.18)' : 'rgba(91,140,105,.12)';
+    ctx.fill();
+  }
+
+  ctx.fillStyle = rgba(palette.far, 0.32);
+  ctx.beginPath();
+  ctx.moveTo(0, h * 0.64);
+  for (let i = 0; i <= 64; i++) {
+    const unitX = i / 64;
+    ctx.lineTo(unitX * w, h * (0.62 + Math.sin(unitX * Math.PI * 5.2 + 0.8) * 0.018));
+  }
+  ctx.lineTo(w, h * 0.72);
+  ctx.lineTo(0, h * 0.72);
+  ctx.closePath();
+  ctx.fill();
+
+  if (palette.carpetAlpha > 0.001 || grassAmount > 2500) {
+    ctx.fillStyle = rgba(palette.carpet, Math.min(0.2, palette.carpetAlpha + Math.max(0, grassAmount - 2500) / 22000));
+    ctx.fillRect(0, h * 0.59, w, h * 0.41);
+  }
+
+  // Sandy shallows frame a winding Lamar River that remains visible across
+  // every camera position and narrows naturally toward the middle distance.
+  traceRiverRibbon(ctx, w, h, 1.42);
+  ctx.fillStyle = '#c6b58a';
+  ctx.fill();
+  ctx.strokeStyle = '#4f6f70';
+  ctx.lineWidth = Math.max(1.4, h * 0.004);
+  ctx.stroke();
+
+  traceRiverRibbon(ctx, w, h);
+  const river = ctx.createLinearGradient(0, h * 0.71, 0, h * 0.93);
+  river.addColorStop(0, '#91ced1');
+  river.addColorStop(0.55, '#69b6c3');
+  river.addColorStop(1, '#4b9aad');
+  ctx.fillStyle = river;
+  ctx.fill();
+  ctx.strokeStyle = '#355f70';
+  ctx.lineWidth = Math.max(1.2, h * 0.0032);
+  ctx.stroke();
+
+  for (const offset of [-0.38, 0.18]) {
+    traceRiverCenter(ctx, w, h, offset);
+    ctx.strokeStyle = 'rgba(244,246,220,.48)';
+    ctx.lineWidth = Math.max(0.8, h * 0.0022);
+    ctx.stroke();
+  }
+
+  // Sagebrush-steppe texture replaces the previous decorative flower carpet.
+  const sageAlpha = (1 - visualFire * 0.7) * 0.58;
+  ctx.strokeStyle = `rgba(71,111,91,${sageAlpha})`;
+  ctx.lineWidth = Math.max(0.7, h * 0.0018);
+  for (let i = 0; i < 74; i++) {
+    const unitX = seeded(i, 831);
+    const unitY = 0.59 + seeded(i, 832) * 0.36;
+    const profile = riverProfileAt(unitX);
+    if (Math.abs(unitY - profile.center) < profile.halfWidth * 1.75) continue;
+    const x = unitX * w;
+    const y = unitY * h;
+    const size = h * (0.006 + seeded(i, 833) * 0.009);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x - size * 0.6, y - size);
+    ctx.moveTo(x, y);
+    ctx.lineTo(x, y - size * 1.2);
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + size * 0.65, y - size * 0.9);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
 
 const PROP_ANCHORS: Record<string, [number, number]> = {
   'pine-cluster': [0.11, 0.68],
@@ -119,19 +708,28 @@ const PROP_ANCHORS: Record<string, [number, number]> = {
 
 // Low vegetation leaves a continuous, visible corridor through the meadow.
 const PROP_SCALE: Record<string, number> = {
+  'pine-cluster': 0.5,
+  pine: 0.44,
+  aspen: 0.55,
   'grass-daisies': 0.55,
   'grass-flowers': 0.62,
-  reeds: 0.55,
-  willow: 0.67,
-  'golden-shrub': 0.75,
-  'river-rocks': 0.85,
-  'moss-rock': 0.78,
-  'distant-pines': 0.68,
+  reeds: 0.5,
+  willow: 0.6,
+  'golden-shrub': 0.58,
+  'river-rocks': 0.7,
+  'moss-rock': 0.68,
+  'distant-pines': 0.58,
 };
 
 function smoothstep(value: number) {
   const t = Math.max(0, Math.min(1, value));
   return t * t * (3 - 2 * t);
+}
+
+function headingDelta(from: number, to: number) {
+  let delta = (to - from + Math.PI) % (Math.PI * 2);
+  if (delta < 0) delta += Math.PI * 2;
+  return delta - Math.PI;
 }
 
 function drawFoliage(ctx: CanvasRenderingContext2D, prop: FoliageSprite) {
@@ -158,6 +756,66 @@ function drawFoliage(ctx: CanvasRenderingContext2D, prop: FoliageSprite) {
 function seeded(i: number, salt: number) {
   const t = Math.sin(i * 12.9898 + salt * 78.233) * 43758.5453;
   return t - Math.floor(t);
+}
+
+/**
+ * Small, low-contrast details that sit over the generated layer pack. They
+ * break up repeated mirror bands while keeping the approved hand-painted
+ * artwork as the dominant visual source.
+ */
+function drawPanoramaDepthDetails(
+  ctx: CanvasRenderingContext2D,
+  worldW: number,
+  h: number,
+  palette: SeasonPalette,
+  elapsed: number,
+) {
+  const panelW = worldW / 2;
+  ctx.save();
+  ctx.lineCap = 'round';
+
+  const haze = ctx.createLinearGradient(0, h * 0.28, 0, h * 0.66);
+  haze.addColorStop(0, 'rgba(235,245,245,0.015)');
+  haze.addColorStop(0.72, 'rgba(235,245,245,0.065)');
+  haze.addColorStop(1, 'rgba(177,207,202,0.02)');
+  ctx.fillStyle = haze;
+  ctx.fillRect(0, h * 0.28, worldW, h * 0.4);
+
+  // A sparse sagebrush texture keeps the meadow from reading as horizontal
+  // bands. It is intentionally quieter than the foreground foliage.
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, h * 0.62, worldW, h * 0.27);
+  ctx.clip();
+  ctx.strokeStyle = rgba(palette.far, 0.2);
+  ctx.lineWidth = Math.max(0.7, h * 0.0014);
+  for (let i = 0; i < 86; i++) {
+    const x = 12 + seeded(i, 911) * (worldW - 24);
+    const y = h * (0.64 + seeded(i, 912) * 0.22);
+    const size = h * (0.006 + seeded(i, 913) * 0.009);
+    const sway = Math.sin(elapsed * 0.65 + i * 0.8) * size * 0.18;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x - size * 0.55 + sway, y - size);
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + sway, y - size * 1.22);
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + size * 0.62 + sway, y - size * 0.82);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // A barely visible atmospheric wash at the mirrored join prevents a hard
+  // vertical seam while preserving the river and foreground silhouettes.
+  const seamWidth = Math.min(panelW * 0.085, 76);
+  const seam = ctx.createLinearGradient(panelW - seamWidth, 0, panelW + seamWidth, 0);
+  seam.addColorStop(0, 'rgba(222,236,232,0)');
+  seam.addColorStop(0.5, 'rgba(222,236,232,0.028)');
+  seam.addColorStop(1, 'rgba(222,236,232,0)');
+  ctx.fillStyle = seam;
+  ctx.fillRect(panelW - seamWidth, h * 0.35, seamWidth * 2, h * 0.27);
+
+  ctx.restore();
 }
 
 function identityFor(agent: WildlifeAgent) {
@@ -224,6 +882,9 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
   const observationRef = useRef(onObservation);
   const statusRef = useRef(onStatus);
   const [tooltip, setTooltip] = useState<TooltipInfo | null>(null);
+  const [cameraProgress, setCameraProgress] = useState(0);
+  const cameraRef = useRef(0);
+  const dragRef = useRef({ active: false, pointerId: -1, startX: 0, startCamera: 0, moved: false });
   const selectedRef = useRef<string | null>(null);
   const hitRef = useRef<{ critters: CritterHit[]; plants: PlantTip[] }>({
     critters: [],
@@ -273,47 +934,15 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
 
     const sheets: Partial<Record<keyof typeof ANIMAL_SHEETS, HTMLImageElement>> = {};
     const generatedSheets: Partial<Record<string, { img: HTMLImageElement; meta: SheetMeta }>> = {};
-    const sceneImages: Partial<Record<SceneLayerKey, { img: HTMLImageElement; src: string }>> = {};
     const generatedProps: { id: string; meta: ScenePropMeta; img: HTMLImageElement }[] = [];
+    const generatedLayers: Partial<Record<SceneLayerKey, HTMLImageElement>> = {};
     let manifest: EcosystemManifest | null = null;
-    let waterMask: HTMLCanvasElement | null = null;
-    let waterSource = 'procedural';
-    let fishRoutes: readonly FishRoute[] = FALLBACK_FISH_ROUTES;
-    const rippleCanvas = document.createElement('canvas');
-    const rippleCtx = rippleCanvas.getContext('2d');
     const animalCanvas = document.createElement('canvas');
     const animalCtx = animalCanvas.getContext('2d');
     const plants = {
       grass: [] as HTMLImageElement[],
       shrubs: [] as HTMLImageElement[],
       trees: [] as HTMLImageElement[],
-    };
-
-    const installWaterMask = (source: HTMLImageElement, inferWater = false) => {
-      const maskCanvas = document.createElement('canvas');
-      maskCanvas.width = source.naturalWidth;
-      maskCanvas.height = source.naturalHeight;
-      const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
-      if (!maskCtx) return;
-      maskCtx.drawImage(source, 0, 0);
-      const pixels = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
-      const { data } = pixels;
-      if (inferWater) {
-        // The river layer also includes its sandy bank. Select blue-green water
-        // from its opaque pixels if the separate mask cannot be downloaded.
-        for (let i = 0; i < data.length; i += 4) {
-          const water = data[i + 3]! > 230 && data[i + 1]! > data[i]! * 1.04 && data[i + 2]! > data[i]! * 1.07;
-          data[i + 3] = water ? 255 : 0;
-        }
-        maskCtx.putImageData(pixels, 0, 0);
-      }
-      fishRoutes = fitFishRoutes((x, y) => {
-        if (x < 0 || x >= 1 || y < 0 || y >= 1) return false;
-        const pixel = Math.floor(y * maskCanvas.height) * maskCanvas.width + Math.floor(x * maskCanvas.width);
-        return data[pixel * 4 + 3]! > 230;
-      });
-      waterMask = maskCanvas;
-      waterSource = inferWater ? 'inferred' : 'generated';
     };
 
     void (async () => {
@@ -336,25 +965,16 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
 
     void (async () => {
       manifest = await loadEcosystemManifest();
-      if (manifest?.scene) {
-        const sceneEntries = Object.entries(manifest.scene.layers) as [SceneLayerKey, { src: string }][];
+      if (manifest?.scene?.layers) {
         await Promise.all(
-          sceneEntries.map(async ([key, layer]) => {
+          (Object.entries(manifest.scene.layers) as [SceneLayerKey, { src: string }][]) .map(async ([key, meta]) => {
             try {
-              sceneImages[key] = { img: await loadImage(layer.src), src: layer.src };
+              generatedLayers[key] = await loadImage(meta.src);
             } catch {
-              /* missing layer keeps the procedural counterpart */
+              /* procedural Lamar fallback remains available when a layer fails */
             }
           }),
         );
-        if (sceneImages.river) {
-          try {
-            if (!manifest.scene.waterMask) throw new Error('No water mask');
-            installWaterMask(await loadImage(manifest.scene.waterMask));
-          } catch {
-            installWaterMask(sceneImages.river.img, true);
-          }
-        }
       }
       if (manifest?.props) {
         await Promise.all(
@@ -410,9 +1030,110 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
       return generatedSheets[`${animal}:${action}`];
     };
 
-    const drawSkyMotion = (ctx: CanvasRenderingContext2D, w: number, h: number, elapsed: number, overcast: boolean | number) => {
+    const drawSkyMotion = (
+      ctx: CanvasRenderingContext2D,
+      worldW: number,
+      viewportW: number,
+      cameraX: number,
+      h: number,
+      elapsed: number,
+      overcast: boolean | number,
+    ) => {
       const cloud = generatedProps.find((prop) => prop.id === 'cloud');
-      drawLivingSky(ctx, w, h, elapsed, cloud?.img, overcast);
+      const overcastStrength = typeof overcast === 'number' ? Math.max(0, Math.min(1, overcast)) : overcast ? 1 : 0;
+      // The sun is an atmospheric layer, so it stays in the visible sky while
+      // the valley itself pans underneath it.
+      const sunX = cameraX + viewportW * 0.79;
+      const sunY = h * 0.15;
+      const radius = Math.max(18, viewportW * 0.033);
+      ctx.save();
+      ctx.globalAlpha = 0.96 - overcastStrength * 0.28;
+      const halo = ctx.createRadialGradient(sunX, sunY, radius * 0.65, sunX, sunY, radius * 2.7);
+      halo.addColorStop(0, 'rgba(255,226,139,.58)');
+      halo.addColorStop(0.48, 'rgba(255,226,139,.16)');
+      halo.addColorStop(1, 'rgba(255,239,192,0)');
+      ctx.fillStyle = halo;
+      ctx.fillRect(sunX - radius * 2.8, sunY - radius * 2.8, radius * 5.6, radius * 5.6);
+      const disk = ctx.createLinearGradient(sunX, sunY - radius, sunX, sunY + radius);
+      disk.addColorStop(0, '#fff0b5');
+      disk.addColorStop(1, '#efbd63');
+      ctx.fillStyle = disk;
+      ctx.strokeStyle = '#b98b4e';
+      ctx.lineWidth = Math.max(0.8, viewportW * 0.0012);
+      ctx.beginPath();
+      ctx.arc(sunX, sunY, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+
+      CLOUDS.forEach((entry, index) => {
+        // Clouds belong to the sky, so anchor them to the viewport rather
+        // than the panning valley. This keeps a complete cloud silhouette at
+        // the panorama seam while it drifts gently across the visible sky.
+        const rawCloudUnit = cloudPosition(index, elapsed);
+        const edgePadding = Math.min(0.46, entry.width * 0.58 + 0.025);
+        // Leave a little breathing room around the low afternoon sun. If a
+        // cloud's natural path enters that light cone, slide it to the near
+        // side instead of painting a large opaque blob over the sun.
+        const safeCloudMax = 1 - edgePadding;
+        let safeCloudUnit = Math.max(edgePadding, Math.min(safeCloudMax, rawCloudUnit));
+        const sunUnit = 0.79;
+        const cloudHalf = entry.width * 0.52;
+        const lightGap = 0.045;
+        if (Math.abs(safeCloudUnit - sunUnit) < cloudHalf + lightGap) {
+          const leftOfSun = sunUnit - cloudHalf - lightGap;
+          const rightOfSun = sunUnit + cloudHalf + lightGap;
+          const canSitRight = rightOfSun <= safeCloudMax;
+          safeCloudUnit = safeCloudUnit <= sunUnit || !canSitRight
+            ? Math.max(edgePadding, leftOfSun)
+            : rightOfSun;
+        }
+        const x = cameraX + safeCloudUnit * viewportW;
+        const y = entry.y * h + Math.sin(elapsed * 0.12 + index) * h * 0.002;
+        const width = entry.width * viewportW;
+        ctx.save();
+        ctx.globalAlpha = entry.opacity * (1 - overcastStrength * 0.18);
+        if (cloud?.img) {
+          const height = width * cloud.img.naturalHeight / cloud.img.naturalWidth;
+          ctx.drawImage(cloud.img, x - width / 2, y - height / 2, width, height);
+        } else {
+          ctx.fillStyle = '#fff4da';
+          ctx.strokeStyle = '#b6ab93';
+          ctx.lineWidth = Math.max(0.8, viewportW * 0.0012);
+          ctx.beginPath();
+          ctx.ellipse(x, y, width * 0.48, width * 0.13, 0, 0, Math.PI * 2);
+          ctx.ellipse(x - width * 0.13, y - width * 0.08, width * 0.22, width * 0.16, 0, 0, Math.PI * 2);
+          ctx.ellipse(x + width * 0.12, y - width * 0.1, width * 0.25, width * 0.19, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+        ctx.restore();
+      });
+      // Keep a small warm edge visible even when a generated cloud happens to
+      // drift over the halo. It gives the valley a consistent light direction
+      // without turning the sun into a hard sticker.
+      ctx.save();
+      ctx.globalAlpha = (0.9 - overcastStrength * 0.22);
+      ctx.strokeStyle = 'rgba(245,204,122,.52)';
+      ctx.lineWidth = Math.max(0.7, viewportW * 0.0011);
+      for (let ray = 0; ray < 8; ray++) {
+        const angle = ray / 8 * Math.PI * 2;
+        const inner = radius * 1.3;
+        const outer = radius * 1.62;
+        ctx.beginPath();
+        ctx.moveTo(sunX + Math.cos(angle) * inner, sunY + Math.sin(angle) * inner);
+        ctx.lineTo(sunX + Math.cos(angle) * outer, sunY + Math.sin(angle) * outer);
+        ctx.stroke();
+      }
+      ctx.fillStyle = '#f7d889';
+      ctx.beginPath();
+      ctx.arc(sunX, sunY, radius * 0.82, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      if (overcastStrength > 0.001) {
+        ctx.fillStyle = `rgba(77,99,116,${overcastStrength * 0.12})`;
+        ctx.fillRect(0, 0, worldW, h * 0.62);
+      }
     };
 
     const sheetFor = (kind: WildlifeKind, action: EcosystemAction) => {
@@ -434,7 +1155,7 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
     ) => {
       const { kind, activity } = agent;
       const moving = Math.hypot(agent.vx, agent.vy * 0.5625) > 0.002;
-      const running = activity === 'chase' || activity === 'flee' || activity === 'pounce';
+      const running = activity === 'chase' || activity === 'flee';
       const action: EcosystemAction = moving || running
         ? running ? 'run' : kind === 'rabbit' ? 'hop' : 'walk'
         : kind === 'deer' && (activity === 'graze' || activity === 'drink') ? 'graze'
@@ -463,15 +1184,30 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
       pose.blend = Math.min(1, pose.blend + delta / 0.22);
       pose.movement += ((moving ? 1 : 0) - pose.movement) * (1 - Math.exp(-delta * 12));
       pose.turnTime = Math.min(1, pose.turnTime + delta / 0.32);
-      const facing = pose.turnTime < 0.5 ? pose.oldFacing : pose.facing;
-      const turnScale = 1 - Math.sin(pose.turnTime * Math.PI) * 0.83;
+      const facing = pose.turnTime < 0.58 ? pose.oldFacing : pose.facing;
+      // Keep the body readable while it arcs through a turn. A small heading
+      // lean communicates the curve; the silhouette never collapses into a
+      // cartoon squash or snaps to a mirrored frame on the same tick.
+      const turnProgress = smoothstep(Math.min(1, pose.turnTime / 0.78));
+      const turnWave = Math.sin(turnProgress * Math.PI);
+      // A real animal narrows its side silhouette as the shoulders lead the
+      // hips through a turn. Keep the effect small enough that the sprite does
+      // not squash or pop while the facing image crossfades.
+      const turnScale = 1 - turnWave * 0.2;
+      const facingHeading = facing > 0 ? 0 : Math.PI;
+      const travelAngle = headingDelta(facingHeading, agent.heading);
+      const headingLean = Math.max(-0.14, Math.min(0.14, Math.sin(travelAngle) * 0.11)) * pose.movement;
+      const shoulderTurn = Math.max(-0.08, Math.min(0.08, Math.sin(headingDelta(agent.heading, agent.targetHeading)) * 0.06));
       // Distance drives feet; stationary gestures have an independent clock.
       pose.frame = moving || running ? agent.gait * current.meta.frames : pose.actionTime * (current.meta.fps ?? 6);
       const depth = 0.84 + (agent.y - 0.61) * 0.8;
       const desiredHeight = FRAME_HEIGHT[kind] * Math.min(sceneWidth / 700, 1.4) * depth;
       const strideWave = Math.sin(agent.gait * Math.PI * 2);
       const hop = kind === 'rabbit' ? Math.max(0, strideWave) * desiredHeight * 0.13 * pose.movement : 0;
-      const pounce = activity === 'pounce' ? Math.sin(Math.min(1, agent.activityTime / 0.65) * Math.PI) * desiredHeight * 0.28 : 0;
+      // The successful encounter is mostly hidden by high grass. Keep the
+      // internal pounce phase for telemetry, but make the visible weight shift
+      // small and grounded instead of a cartoon leap.
+      const pounce = activity === 'pounce' ? Math.sin(Math.min(1, agent.activityTime / 0.65) * Math.PI) * desiredHeight * 0.075 : 0;
       const breath = Math.sin(elapsed * 2.1 + agent.phase) * 0.007 * (1 - pose.movement);
       const weight = kind !== 'rabbit' ? Math.abs(strideWave) * desiredHeight * (running ? 0.025 : 0.012) * pose.movement : 0;
       target.save();
@@ -483,14 +1219,26 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
       target.translate(x, y - hop - pounce - weight);
       const nibble = activity === 'graze' || activity === 'feed' || activity === 'drink';
       const pitch = activity === 'stalk' ? 0.025 : activity === 'feed' ? 0.09 : activity === 'drink' ? 0.075 : activity === 'graze' ? 0.055 : 0;
-      target.rotate(facing * (pitch + (nibble ? Math.sin(elapsed * 4 + agent.phase) * 0.012 : 0)));
+      target.rotate(facing * (pitch + (nibble ? Math.sin(elapsed * 4 + agent.phase) * 0.012 : 0)) + headingLean + shoulderTurn);
       target.scale(turnScale, 1 + breath - (activity === 'stalk' ? 0.055 : 0));
-      const drawPose = (sheet: ReturnType<typeof sheetFor>, frame: number, alpha: number) => {
+      const drawPose = (
+        sheet: ReturnType<typeof sheetFor>,
+        frame: number,
+        alpha: number,
+        drawFacing = facing,
+      ) => {
         if (!sheet.img || alpha <= 0) return;
         const meta = sheet.meta;
         const anchored = meta.anchor ? meta : { ...meta, anchor: { x: 0.5, y: 1 } };
-        target.globalAlpha = agent.opacity * alpha;
-        drawSheetFrameAnchored(target, sheet.img, anchored, frame, 0, 0, desiredHeight / meta.frameH, (meta.facing ?? 'right') === 'right' ? facing < 0 : facing > 0);
+        const frameIndex = Math.floor(frame);
+        const frameAmount = meta.frames >= 16 ? frame - frameIndex : 0;
+        const flip = (meta.facing ?? 'right') === 'right' ? drawFacing < 0 : drawFacing > 0;
+        target.globalAlpha = agent.opacity * alpha * (1 - frameAmount);
+        drawSheetFrameAnchored(target, sheet.img, anchored, frameIndex, 0, 0, desiredHeight / meta.frameH, flip);
+        if (frameAmount > 0.001) {
+          target.globalAlpha = agent.opacity * alpha * frameAmount;
+          drawSheetFrameAnchored(target, sheet.img, anchored, frameIndex + 1, 0, 0, desiredHeight / meta.frameH, flip);
+        }
       };
       const previous = sheetFor(kind, pose.previousAction);
       const blend = previous.img ? smoothstep(pose.blend) : 1;
@@ -500,7 +1248,14 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
         // avoids the transparent dip of a normal source-over crossfade.
         target.globalCompositeOperation = 'lighter';
       }
-      drawPose(current, pose.frame, blend);
+      if (pose.turnTime < 0.84 && pose.oldFacing !== pose.facing) {
+        const oldAlpha = (1 - turnProgress) * blend;
+        const newAlpha = turnProgress * blend;
+        drawPose(current, pose.frame, oldAlpha, pose.oldFacing);
+        drawPose(current, pose.frame, newAlpha, pose.facing);
+      } else {
+        drawPose(current, pose.frame, blend, facing);
+      }
       target.restore();
 
       // Sprite sheets carry the broad silhouette. These small overlays make
@@ -560,31 +1315,20 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
       return true;
     };
 
-    const drawSceneLayer = (ctx: CanvasRenderingContext2D, key: SceneLayerKey, w: number, h: number) => {
-      const entry = sceneImages[key];
-      if (!entry) return false;
-      const sourceW = manifest?.scene?.width ?? 2048;
-      const sourceH = manifest?.scene?.height ?? 1152;
-      // Contain keeps the generated composition undistorted on narrow panels.
-      const scale = Math.min(w / sourceW, h / sourceH);
-      const dw = sourceW * scale;
-      const dh = sourceH * scale;
-      ctx.drawImage(entry.img, (w - dw) / 2, (h - dh) / 2, dw, dh);
-      return true;
-    };
-
     const prepareFoliage = (w: number, h: number, elapsed: number): FoliageSprite[] => {
       const scale = Math.min(w / (manifest?.scene?.width ?? 2048), h / (manifest?.scene?.height ?? 1152));
-      const sprites: FoliageSprite[] = generatedProps.filter((prop) => prop.id !== 'cloud').map((prop, index) => {
+      const sprites: FoliageSprite[] = generatedProps
+        .filter((prop) => prop.id !== 'cloud' && !['grass-flowers', 'grass-daisies'].includes(prop.id))
+        .map((prop, index) => {
         const [x, y] = PROP_ANCHORS[prop.id] ?? [0.5, 0.86];
         const plant = !['river-rocks', 'moss-rock'].includes(prop.id);
         return { id: prop.id, img: prop.img, x: x * w, y: y * h, width: prop.meta.width * scale * (PROP_SCALE[prop.id] ?? 1), height: prop.meta.height * scale * (PROP_SCALE[prop.id] ?? 1), sway: plant ? Math.sin(elapsed * 0.8 + index * 0.9) * 0.014 : 0 };
       });
       for (const patch of WILDLIFE_COVER_PATCHES) {
-        const count = patch.id === 'left-tall-grass' ? 7 : 3;
+        const count = patch.id === 'left-tall-grass' ? 4 : 2;
         for (let i = 0; i < count; i++) {
           const offset = i / (count - 1) * 2 - 1;
-          const prop = generatedProps.find((p) => p.id === (i % 2 ? 'grass-flowers' : 'grass-daisies'));
+          const prop = generatedProps.find((p) => p.id === 'reeds');
           const height = patch.height * h * (0.64 + (1 - Math.abs(offset)) * 0.45);
           const x = patch.x + patch.rx * offset * 0.86;
           const y = patch.y + patch.ry * (0.38 + 0.12 * Math.sin(i * 2.3));
@@ -597,65 +1341,45 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
     };
 
     const drawWaterMotion = (ctx: CanvasRenderingContext2D, w: number, h: number, elapsed: number) => {
-      if (waterMask && rippleCtx) {
-        const width = Math.max(1, Math.floor(w * dpr));
-        const height = Math.max(1, Math.floor(h * dpr));
-        if (rippleCanvas.width !== width || rippleCanvas.height !== height) {
-          rippleCanvas.width = width;
-          rippleCanvas.height = height;
-        }
-        rippleCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        rippleCtx.clearRect(0, 0, w, h);
-        rippleCtx.save();
-        drawSceneFish(rippleCtx, w, h, elapsed, fishRoutes);
-        rippleCtx.strokeStyle = 'rgba(255,239,190,0.26)';
-        rippleCtx.lineWidth = 3;
-        for (let i = 0; i < 5; i++) {
-          const y = h * (0.61 + ((i * 0.073 + elapsed * 0.012) % 0.34));
-          const x = w * (0.48 + ((i * 0.11 + elapsed * 0.01) % 0.34));
-          rippleCtx.beginPath();
-          rippleCtx.ellipse(x, y, w * 0.03, h * 0.006, 0, 0, Math.PI * 2);
-          rippleCtx.stroke();
-        }
-        rippleCtx.strokeStyle = 'rgba(255,255,255,0.42)';
-        rippleCtx.lineWidth = 1.5;
-        for (let i = 0; i < 9; i++) {
-          const y = h * (0.58 + ((i * 0.047 + elapsed * 0.025) % 0.37));
-          const x = w * (0.48 + ((i * 0.073 + elapsed * 0.018) % 0.22));
-          rippleCtx.beginPath();
-          rippleCtx.moveTo(x, y);
-          rippleCtx.quadraticCurveTo(x + w * 0.025, y - 2, x + w * 0.05, y);
-          rippleCtx.stroke();
-        }
-        const sourceW = manifest?.scene?.width ?? 2048;
-        const sourceH = manifest?.scene?.height ?? 1152;
-        const scale = Math.min(w / sourceW, h / sourceH);
-        const dw = sourceW * scale;
-        const dh = sourceH * scale;
-        rippleCtx.globalCompositeOperation = 'destination-in';
-        rippleCtx.drawImage(waterMask, (w - dw) / 2, (h - dh) / 2, dw, dh);
-        rippleCtx.restore();
-        ctx.drawImage(rippleCanvas, 0, 0, w, h);
-        return;
-      }
       ctx.save();
-      ctx.beginPath();
-      ctx.moveTo(w * 0.52, h * 0.78);
-      ctx.quadraticCurveTo(w * 0.5, h * 0.9, w * 0.58, h);
-      ctx.lineTo(w * 0.72, h);
-      ctx.quadraticCurveTo(w * 0.72, h * 0.9, w * 0.64, h * 0.78);
+      traceRiverRibbon(ctx, w, h);
       ctx.clip();
-      drawSceneFish(ctx, w, h, elapsed, FALLBACK_FISH_ROUTES);
+      drawSceneFish(ctx, w, h, elapsed, PANORAMA_FISH_ROUTES);
       ctx.strokeStyle = 'rgba(255,255,255,0.42)';
-      ctx.lineWidth = 1.5;
-      for (let i = 0; i < 9; i++) {
-        const y = h * (0.78 + ((i * 0.027 + elapsed * 0.025) % 0.22));
-        const x = w * (0.48 + ((i * 0.073 + elapsed * 0.018) % 0.22));
+      ctx.lineWidth = Math.max(0.8, h * 0.0024);
+      for (let i = 0; i < 20; i++) {
+        const unitX = (seeded(i, 901) + elapsed * (0.002 + (i % 4) * 0.0004)) % 1;
+        const profile = riverProfileAt(unitX);
+        const x = unitX * w;
+        const y = (profile.center + (seeded(i, 902) - 0.5) * profile.halfWidth * 1.2) * h;
+        const length = Math.max(9, w * (0.007 + seeded(i, 903) * 0.006));
         ctx.beginPath();
         ctx.moveTo(x, y);
-        ctx.quadraticCurveTo(x + w * 0.025, y - 2, x + w * 0.05, y);
+        ctx.quadraticCurveTo(x + length * 0.5, y - 2, x + length, y);
         ctx.stroke();
       }
+      ctx.restore();
+    };
+
+    const drawGeneratedWaterMotion = (ctx: CanvasRenderingContext2D, w: number, h: number, elapsed: number) => {
+      // The generated river already contains the bank, shallows and painted
+      // current. Add only the animated biological layer here so it remains
+      // aligned with the mirrored water artwork instead of repainting it with
+      // a flat procedural ribbon.
+      drawSceneFish(ctx, w, h, elapsed, PANORAMA_FISH_ROUTES);
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,255,255,0.36)';
+      ctx.lineWidth = Math.max(0.7, h * 0.0018);
+      PANORAMA_FISH_ROUTES.forEach((route, index) => {
+        const position = fishPosition(route, elapsed + index * 0.08);
+        const x = position.x * w;
+        const y = position.y * h;
+        const length = Math.max(8, w * (0.004 + (index % 3) * 0.001));
+        ctx.beginPath();
+        ctx.moveTo(x - length, y + h * 0.008);
+        ctx.quadraticCurveTo(x, y + h * 0.004, x + length, y + h * 0.008);
+        ctx.stroke();
+      });
       ctx.restore();
     };
 
@@ -717,13 +1441,15 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
       const rect = canvas.getBoundingClientRect();
       const w = rect.width;
       const h = rect.height;
+      const worldW = Math.max(w, w * WORLD_WIDTH_FACTOR);
+      const maxCamera = Math.max(0, worldW - w);
+      cameraRef.current = Math.max(0, Math.min(maxCamera, cameraRef.current));
       if (canvas.width !== Math.floor(w * dpr) || canvas.height !== Math.floor(h * dpr)) {
         canvas.width = Math.floor(w * dpr);
         canvas.height = Math.floor(h * dpr);
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       }
 
-      const hasSceneArt = Object.keys(sceneImages).length > 0;
       const palette = seasonPaletteAt(visualSeason);
       const rainOvercast = Math.max(0, Math.min(1, (visualRain - 0.45) / 0.55));
       const seasonCyclePosition = ((visualSeason % 4) + 4) % 4;
@@ -732,152 +1458,64 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
         : palette.snow > 0.02
           ? `brightness(${1 + palette.snow * 0.08}) saturate(${1 - palette.snow * 0.5})`
           : seasonCyclePosition > 1.8 && seasonCyclePosition < 2.8
-            ? 'sepia(0.3) hue-rotate(-18deg) saturate(1.15)'
+            ? 'sepia(0.18) hue-rotate(-12deg) saturate(1.05)'
             : seasonCyclePosition > 0.8 && seasonCyclePosition < 1.8
               ? 'brightness(1.06) saturate(1.15)'
               : 'none';
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, w, h);
+      ctx.clip();
+      ctx.translate(-cameraRef.current, 0);
       const g = ctx.createLinearGradient(0, 0, 0, h);
       g.addColorStop(0, rgba(palette.skyTop));
       g.addColorStop(1, rgba(palette.skyBottom));
       ctx.fillStyle = g;
-      ctx.fillRect(0, 0, w, h);
-      drawSceneLayer(ctx, 'sky', w, h);
-      drawSkyMotion(ctx, w, h, elapsed, rainOvercast);
-
-      // —— 远山 ——
-      if (!sceneImages.mountains) {
-        ctx.fillStyle = rgba(palette.far);
-        ctx.globalAlpha = 0.35;
-        ctx.beginPath();
-        ctx.moveTo(0, h * 0.42);
-        ctx.lineTo(w * 0.15, h * 0.22);
-        ctx.lineTo(w * 0.28, h * 0.38);
-        ctx.lineTo(w * 0.45, h * 0.16);
-        ctx.lineTo(w * 0.62, h * 0.36);
-        ctx.lineTo(w * 0.78, h * 0.18);
-        ctx.lineTo(w, h * 0.34);
-        ctx.lineTo(w, h * 0.5);
-        ctx.lineTo(0, h * 0.5);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-
-        // 雪顶
-        if (palette.snow > 0.02) {
-          ctx.fillStyle = `rgba(255,255,255,${0.85 * palette.snow})`;
-          ctx.beginPath();
-          ctx.moveTo(w * 0.45, h * 0.16);
-          ctx.lineTo(w * 0.48, h * 0.22);
-          ctx.lineTo(w * 0.42, h * 0.22);
-          ctx.fill();
-          ctx.beginPath();
-          ctx.moveTo(w * 0.78, h * 0.18);
-          ctx.lineTo(w * 0.81, h * 0.24);
-          ctx.lineTo(w * 0.74, h * 0.24);
-          ctx.fill();
-        }
-
+      ctx.fillRect(0, 0, worldW, h);
+      const generatedLandscape = Boolean(
+        generatedLayers.mountains && generatedLayers.meadow && generatedLayers.river,
+      );
+      if (generatedLandscape) {
+        // Use the approved Yellowstone art layers as the geographic anchor.
+        // They are mirrored panel-by-panel so the river keeps its perspective
+        // while the camera still has a genuinely wide field to explore.
+        drawMirroredPanoramaLayer(ctx, generatedLayers.mountains, worldW, h, 0.96, h * 0.64);
+        drawMirroredPanoramaLayer(ctx, generatedLayers.meadow, worldW, h, 0.9);
+        drawMirroredPanoramaLayer(ctx, generatedLayers.forestBack, worldW, h, 0.72, h * 0.74);
+        // The source river panel is mirrored only for the asset preview. In
+        // the live panorama it would reverse the bend at the panel join, so
+        // the river is drawn once as a continuous ribbon below.
+        drawContinuousGeneratedRiver(ctx, worldW, h, elapsed);
+        drawMirroredPanoramaLayer(ctx, generatedLayers.foreground, worldW, h, 0.88);
+        drawPanoramaDepthDetails(ctx, worldW, h, palette, elapsed);
+        // The generated panels contain a static cloud pass; the living sky is
+        // drawn last so the sun and cloud drift remain animated and pausable.
+        drawSkyMotion(ctx, worldW, w, cameraRef.current, h, elapsed, rainOvercast);
+      } else {
+        drawSkyMotion(ctx, worldW, w, cameraRef.current, h, elapsed, rainOvercast);
+        drawLamarLandscape(ctx, worldW, h, palette, s.grass, visualFire);
       }
 
-      if (!sceneImages.meadow) {
-        // 中景山丘
-        ctx.fillStyle = rgba(palette.far);
-        ctx.beginPath();
-        ctx.moveTo(0, h * 0.48);
-        ctx.lineTo(w * 0.2, h * 0.32);
-        ctx.lineTo(w * 0.4, h * 0.45);
-        ctx.lineTo(w * 0.55, h * 0.3);
-        ctx.lineTo(w * 0.75, h * 0.44);
-        ctx.lineTo(w, h * 0.34);
-        ctx.lineTo(w, h);
-        ctx.lineTo(0, h);
-        ctx.fill();
-
-        // 近景草地
-        ctx.fillStyle = rgba(palette.near);
-        ctx.fillRect(0, h * 0.55, w, h * 0.45);
-        if (palette.carpetAlpha > 0.001) {
-          ctx.fillStyle = rgba(palette.carpet, palette.carpetAlpha * (1 - visualFire * 0.75));
-          ctx.fillRect(0, h * 0.58, w, h * 0.42);
-        }
-
-        if (visualFire < 0.99 && s.grass > 2500) {
-          const carpet = Math.min(0.28, (s.grass - 2500) / 10000) * (1 - visualFire * 0.8);
-          ctx.fillStyle = rgba(palette.carpet, carpet);
-          ctx.fillRect(0, h * 0.58, w, h * 0.42);
-        }
-
-      }
-
-      // —— 间歇泉蒸汽 ——
-      const steamX = w * 0.22;
-      const steamY = h * 0.5;
-      for (let i = 0; i < 4; i++) {
-        const rise = ((elapsed * 18 + i * 22) % 50);
-        const alpha = 0.18 - rise / 280;
-        if (alpha <= 0) continue;
-        ctx.fillStyle = `rgba(255,255,255,${alpha})`;
-        ctx.beginPath();
-        ctx.ellipse(
-          steamX + Math.sin(elapsed + i) * 6,
-          steamY - rise,
-          10 + i * 3,
-          6 + i,
-          0,
-          0,
-          Math.PI * 2,
-        );
-        ctx.fill();
-      }
-      ctx.fillStyle = '#b0bec5';
-      ctx.fillRect(steamX - 6, steamY, 12, 4);
-
-      // —— 河流中景 ——
-      // Generated river art already contains the full shape. Keep the
-      // procedural fallback only when that layer is unavailable.
-      if (!sceneImages.river) {
-        const river = ctx.createLinearGradient(w * 0.5, h * 0.78, w * 0.7, h);
-        river.addColorStop(0, '#4fc3f7');
-        river.addColorStop(1, '#0288d1');
-        ctx.fillStyle = river;
-        ctx.beginPath();
-        // Keep the same dry upper corridor used by the wildlife navigation.
-        ctx.moveTo(w * 0.52, h * 0.78);
-        ctx.quadraticCurveTo(w * 0.5, h * 0.9, w * 0.58, h);
-        ctx.lineTo(w * 0.72, h);
-        ctx.quadraticCurveTo(w * 0.72, h * 0.9, w * 0.64, h * 0.78);
-        ctx.fill();
-        // 高光
-        ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(w * 0.58, h * 0.8);
-        ctx.quadraticCurveTo(w * 0.54, h * 0.9, w * 0.62, h * 0.95);
-        ctx.stroke();
-      }
-
-      // Generated layers replace their matching procedural counterpart while
-      // any missing file remains covered by the original drawing above.
-      if (hasSceneArt) {
-        for (const key of ['mountains', 'meadow', 'forestBack', 'river'] as const) {
-          drawSceneLayer(ctx, key, w, h);
-        }
-      }
       // Keep generated layers and procedural fallbacks in the same seasonal
       // atmosphere. The strength is continuous, so a forced season reads as
       // a slow change in light instead of a hard palette cut.
       if (palette.tintAlpha > 0.001 || visualFire > 0.001) {
         ctx.save();
         ctx.fillStyle = rgba(palette.tint);
-        ctx.globalAlpha = palette.tintAlpha;
-        ctx.fillRect(0, 0, w, h * 0.86);
+        // Generated layers already carry their own seasonal light. Keep the
+        // tint restrained there so the sun remains a readable, shared source
+        // of light while the fallback scene still receives the full shift.
+        ctx.globalAlpha = generatedLandscape ? palette.tintAlpha * 0.45 : palette.tintAlpha;
+        ctx.fillRect(0, 0, worldW, h * 0.86);
         if (visualFire > 0.001) {
           ctx.fillStyle = '#5d4037';
           ctx.globalAlpha = visualFire * 0.16;
-          ctx.fillRect(0, h * 0.42, w, h * 0.58);
+          ctx.fillRect(0, h * 0.42, worldW, h * 0.58);
         }
         ctx.restore();
       }
-      drawWaterMotion(ctx, w, h, elapsed);
+      if (generatedLandscape) drawGeneratedWaterMotion(ctx, worldW, h, elapsed);
+      else drawWaterMotion(ctx, worldW, h, elapsed);
 
       const { treeN, shrubN, grassN } = plantCounts(s, visualFire);
       const hasTrees = plants.trees.length > 0;
@@ -894,7 +1532,7 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
       ctx.filter = vegetationFilter;
 
       if (!hasGeneratedTrees) for (let i = 0; i < treeN; i++) {
-        const tx = 24 + seeded(i, 41) * (w - 48);
+        const tx = 24 + seeded(i, 41) * (worldW - 48);
         const ty = h * 0.52 + seeded(i, 42) * h * 0.08;
         const size = 48 + seeded(i, 43) * 36;
         if (hasTrees) {
@@ -906,7 +1544,7 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
       }
 
       if (!hasGeneratedShrubs) for (let i = 0; i < shrubN; i++) {
-        const sx = 20 + seeded(i, 51) * (w - 40);
+        const sx = 20 + seeded(i, 51) * (worldW - 40);
         const sy = h * 0.58 + seeded(i, 52) * h * 0.12;
         const size = 28 + seeded(i, 53) * 22;
         if (hasShrubs) {
@@ -931,7 +1569,7 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
       }
 
       if (!hasGeneratedGrass) for (let i = 0; i < grassN; i++) {
-        const gx = 12 + seeded(i, 61) * (w - 24);
+        const gx = 12 + seeded(i, 61) * (worldW - 24);
         const gy = h * 0.7 + seeded(i, 62) * h * 0.22;
         const size = 16 + seeded(i, 63) * 18;
         if (hasGrass) {
@@ -946,7 +1584,7 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
       ctx.restore();
 
       const hits: CritterHit[] = [];
-      const foliage = prepareFoliage(w, h, elapsed);
+      const foliage = prepareFoliage(worldW, h, elapsed);
       ctx.save();
       ctx.filter = vegetationFilter;
       for (const prop of foliage) drawFoliage(ctx, prop);
@@ -962,9 +1600,29 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
       }
       for (const agent of [...wildlife.agents].sort((a, b) => a.y - b.y)) {
         if (agent.opacity < 0.05) continue;
-        const x = agent.x * w;
+        if (
+          agent.kind === 'wolf' &&
+          agent.id.endsWith('-2') &&
+          wildlife.agents.some((other) => (
+            other.kind === 'wolf' &&
+            other.id !== agent.id &&
+            other.opacity >= 0.05 &&
+            Math.hypot(other.x - agent.x, (other.y - agent.y) * 0.5625) < 0.18
+          ))
+        ) continue;
+        const x = agent.x * worldW;
         const y = agent.y * h;
-        const drawnHeight = FRAME_HEIGHT[agent.kind] * Math.min(w / 700, 1.4) * (0.84 + (agent.y - 0.61) * 0.8);
+        const anchorScale = agent.id.endsWith('-2') ? 0.82 : 1;
+        const drawnHeight = FRAME_HEIGHT[agent.kind] * anchorScale * Math.min(w / 700, 1.4) * (0.84 + (agent.y - 0.61) * 0.8);
+        // Let a body enter the frame as a whole. This avoids a screenshot
+        // catching half an elk at a camera boundary while still allowing the
+        // same individual to walk naturally across the panorama during a
+        // drag.
+        // The source silhouettes are wider than their nominal frame height;
+        // leave enough horizontal breathing room that a drag never exposes a
+        // clipped antler, tail, or hind leg at the viewport edge.
+        const edgeMargin = drawnHeight * (agent.kind === 'rabbit' ? 0.78 : 1.34);
+        if (x < cameraRef.current + edgeMargin || x > cameraRef.current + w - edgeMargin) continue;
         hits.push({ agent, hitX: x, hitY: y - drawnHeight * 0.42, hitR: Math.max(9, drawnHeight * 0.4) });
         const target = animalCtx ?? ctx;
         const left = x - bufferW / 2;
@@ -1010,12 +1668,13 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
         if (!wildlife.agents.some((agent) => agent.id === id)) visualPoses.delete(id);
       }
 
-      if (hasSceneArt) drawSceneLayer(ctx, 'foreground', w, h);
-
-      hitRef.current = { critters: hits, plants: plantTips };
+      hitRef.current = {
+        critters: hits.map((hit) => ({ ...hit, hitX: hit.hitX - cameraRef.current })),
+        plants: plantTips.map((tip) => ({ ...tip, x: tip.x - cameraRef.current })),
+      };
       if (now - lastUiUpdate > 200) {
         lastUiUpdate = now;
-        const selected = hits.find((hit) => hit.agent.id === selectedRef.current);
+        const selected = hitRef.current.critters.find((hit) => hit.agent.id === selectedRef.current);
         if (selectedRef.current) setTooltip(selected ? tooltipFor(selected) : null);
         if (statusRef.current) {
           const byKind = new Map<WildlifeKind, WildlifeAgent>();
@@ -1038,10 +1697,19 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
           canvas.dataset.wildlife = JSON.stringify({
             time: wildlife.time,
             observation: wildlife.observation,
-            scene: { sun: true, clouds: CLOUDS.length, fish: (waterMask ? fishRoutes : FALLBACK_FISH_ROUTES).length, waterSource },
+            scene: {
+              sun: true,
+              clouds: CLOUDS.length,
+              fish: PANORAMA_FISH_ROUTES.length,
+              waterSource: generatedLandscape ? 'generated-river-mask-panorama' : 'lamar-panorama',
+              cameraX: cameraRef.current,
+              cameraProgress: cameraRef.current / Math.max(1, maxCamera),
+              worldWidth: worldW,
+              viewportWidth: w,
+            },
             environment: {
               clouds: CLOUDS.map((_, index) => cloudPosition(index, elapsed)),
-              fish: (waterMask ? fishRoutes : FALLBACK_FISH_ROUTES).map((route) => ({ ...fishPosition(route, elapsed), size: route.size })),
+              fish: PANORAMA_FISH_ROUTES.map((route) => ({ ...fishPosition(route, elapsed), size: route.size })),
               time: elapsed,
               visualSeason,
               visualRain,
@@ -1050,7 +1718,7 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
               snowStrength: palette.snow,
             },
             poses: [...visualPoses.entries()].map(([id, pose]) => ({ id, action: pose.action, blend: pose.blend, frame: pose.frame })),
-            agents: wildlife.agents.map(({ id, kind, x, y, vx, vy, facing, activity, gait, opacity, cover }) => ({ id, kind, x, y, vx, vy, facing, activity, gait, opacity, cover })),
+            agents: wildlife.agents.map(({ id, kind, x, y, vx, vy, facing, heading, targetHeading, activity, gait, opacity, cover }) => ({ id, kind, x, y, vx, vy, facing, heading, targetHeading, activity, gait, opacity, cover })),
             statuses: (['wolf', 'deer', 'rabbit'] as WildlifeKind[]).map((kind) => {
               const agent = wildlife.agents.find((candidate) => candidate.kind === kind);
               return { kind, label: WILDLIFE_LABELS[kind], activity: agent?.activity ?? 'rest' };
@@ -1069,29 +1737,29 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
         heat.addColorStop(0, 'rgba(255,112,55,0)');
         heat.addColorStop(1, 'rgba(255,78,32,0.9)');
         ctx.fillStyle = heat;
-        ctx.fillRect(0, h * 0.48, w, h * 0.52);
+        ctx.fillRect(0, h * 0.48, worldW, h * 0.52);
         for (let i = 0; i < 9; i++) {
-          const baseX = w * (0.09 + seeded(i, 301) * 0.82);
+          const baseX = worldW * (0.09 + seeded(i, 301) * 0.82);
           const baseY = h * (0.76 + seeded(i, 302) * 0.16);
           const flameH = h * (0.08 + seeded(i, 303) * 0.11) * Math.max(0.55, visualFire);
-          const sway = Math.sin(elapsed * (3.4 + seeded(i, 304) * 1.8) + i) * w * 0.009;
+          const sway = Math.sin(elapsed * (3.4 + seeded(i, 304) * 1.8) + i) * worldW * 0.009;
           ctx.globalAlpha = visualFire * (0.48 + seeded(i, 305) * 0.3);
           ctx.fillStyle = i % 2 ? '#e85d2a' : '#f59e43';
           ctx.beginPath();
-          ctx.moveTo(baseX - w * 0.012, baseY);
-          ctx.quadraticCurveTo(baseX - w * 0.026, baseY - flameH * 0.42, baseX + sway, baseY - flameH);
-          ctx.quadraticCurveTo(baseX + w * 0.023, baseY - flameH * 0.47, baseX + w * 0.012, baseY);
+          ctx.moveTo(baseX - worldW * 0.012, baseY);
+          ctx.quadraticCurveTo(baseX - worldW * 0.026, baseY - flameH * 0.42, baseX + sway, baseY - flameH);
+          ctx.quadraticCurveTo(baseX + worldW * 0.023, baseY - flameH * 0.47, baseX + worldW * 0.012, baseY);
           ctx.fill();
           ctx.globalAlpha = visualFire * 0.58;
           ctx.fillStyle = '#ffe2a1';
           ctx.beginPath();
-          ctx.ellipse(baseX + sway * 0.4, baseY - flameH * 0.27, w * 0.006, flameH * 0.2, 0, 0, Math.PI * 2);
+          ctx.ellipse(baseX + sway * 0.4, baseY - flameH * 0.27, worldW * 0.006, flameH * 0.2, 0, 0, Math.PI * 2);
           ctx.fill();
         }
         ctx.globalAlpha = visualFire * 0.5;
         ctx.fillStyle = '#f6b34a';
         for (let i = 0; i < 12; i++) {
-          const ex = w * (0.08 + seeded(i, 306) * 0.84);
+          const ex = worldW * (0.08 + seeded(i, 306) * 0.84);
           const ey = h * (0.64 + seeded(i, 307) * 0.27) - elapsed * (4 + i % 4);
           ctx.beginPath();
           ctx.arc(ex, ey % (h * 0.34) + h * 0.52, 1.1 + (i % 3) * 0.55, 0, Math.PI * 2);
@@ -1101,10 +1769,10 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
         ctx.globalAlpha = visualFire * 0.12;
         ctx.fillStyle = '#5d514b';
         for (let i = 0; i < 4; i++) {
-          const sx = w * (0.2 + i * 0.2) + Math.sin(elapsed * 0.4 + i) * w * 0.02;
+          const sx = worldW * (0.2 + i * 0.2) + Math.sin(elapsed * 0.4 + i) * worldW * 0.02;
           const sy = h * (0.58 - i * 0.07);
           ctx.beginPath();
-          ctx.ellipse(sx, sy, w * (0.035 + i * 0.008), h * (0.022 + i * 0.006), 0, 0, Math.PI * 2);
+          ctx.ellipse(sx, sy, worldW * (0.035 + i * 0.008), h * (0.022 + i * 0.006), 0, 0, Math.PI * 2);
           ctx.fill();
         }
         ctx.restore();
@@ -1117,7 +1785,7 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
         ctx.lineWidth = Math.max(0.7, 0.8 + rainStrength * 0.5);
         const drops = Math.round(8 + rainStrength * 64);
         for (let i = 0; i < drops; i++) {
-          const rx = (seeded(i, 321) * w + elapsed * (38 + (i % 7) * 8)) % w;
+          const rx = (seeded(i, 321) * worldW + elapsed * (38 + (i % 7) * 8)) % worldW;
           const ry = (seeded(i, 322) * h * 0.62 + elapsed * (62 + (i % 5) * 10)) % (h * 0.7);
           const length = 4 + rainStrength * 8;
           ctx.beginPath();
@@ -1129,12 +1797,16 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
       }
 
       // 冬雪粒子也随季节调色值渐入渐出，而不是等到 season 字符串变更才出现。
-      if (palette.snow > 0.005) {
+      // The generated Yellowstone layer already carries a clear sky and
+      // painted ground. A white particle field over that artwork reads as
+      // dust or stars unless the procedural fallback is active, so winter in
+      // the generated panorama is conveyed by the cool tint and ground wash.
+      if (palette.snow > 0.005 && !generatedLandscape) {
         ctx.save();
         ctx.fillStyle = `rgba(255,255,255,${0.2 + palette.snow * 0.65})`;
         const flakes = Math.round(8 + palette.snow * 40);
         for (let i = 0; i < flakes; i++) {
-          const sx = (seeded(i, 200) * w + elapsed * (8 + (i % 5) * 2) + Math.sin(elapsed * 0.6 + i) * 5) % w;
+          const sx = (seeded(i, 200) * worldW + elapsed * (8 + (i % 5) * 2) + Math.sin(elapsed * 0.6 + i) * 5) % worldW;
           const sy = (seeded(i, 201) * h + elapsed * (20 + (i % 7)) * 8) % h;
           ctx.beginPath();
           ctx.arc(sx, sy, 1.2 + (i % 3) * 0.4, 0, Math.PI * 2);
@@ -1143,6 +1815,7 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
         ctx.restore();
       }
 
+      ctx.restore();
       raf = requestAnimationFrame(paint);
     };
 
@@ -1192,18 +1865,82 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
   };
 
   const onMove = (e: MouseEvent) => {
+    if (dragRef.current.active) return;
     const tip = hitTest(e.clientX, e.clientY);
     selectedRef.current = tip?.id ?? null;
     setTooltip(tip);
   };
   const onClick = (e: MouseEvent) => {
+    if (dragRef.current.moved) {
+      dragRef.current.moved = false;
+      return;
+    }
     const tip = hitTest(e.clientX, e.clientY);
     selectedRef.current = tip?.id ?? null;
     setTooltip(tip);
   };
   const onLeave = () => {
+    if (dragRef.current.active) return;
     selectedRef.current = null;
     setTooltip(null);
+  };
+
+  const clampCamera = (next: number) => {
+    const canvas = ref.current;
+    if (!canvas) return 0;
+    const width = canvas.getBoundingClientRect().width;
+    return Math.max(0, Math.min(Math.max(0, width * (WORLD_WIDTH_FACTOR - 1)), next));
+  };
+
+  const setCamera = (next: number) => {
+    cameraRef.current = clampCamera(next);
+    const viewport = ref.current?.getBoundingClientRect().width ?? 1;
+    setCameraProgress(Math.max(0, Math.min(1, cameraRef.current / Math.max(1, viewport * (WORLD_WIDTH_FACTOR - 1)))));
+  };
+
+  const onPointerDown = (e: PointerEvent<HTMLCanvasElement>) => {
+    e.currentTarget.focus();
+    dragRef.current = {
+      active: true,
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startCamera: cameraRef.current,
+      moved: false,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    selectedRef.current = null;
+    setTooltip(null);
+  };
+
+  const onPointerMove = (e: PointerEvent<HTMLCanvasElement>) => {
+    const drag = dragRef.current;
+    if (!drag.active || drag.pointerId !== e.pointerId) return;
+    const delta = e.clientX - drag.startX;
+    if (Math.abs(delta) > 3) drag.moved = true;
+    setCamera(drag.startCamera - delta);
+  };
+
+  const endPointerDrag = (e: PointerEvent<HTMLCanvasElement>) => {
+    if (dragRef.current.pointerId !== e.pointerId) return;
+    dragRef.current.active = false;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+  };
+
+  const onWheel = (e: WheelEvent<HTMLCanvasElement>) => {
+    const horizontalDelta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+    if (Math.abs(horizontalDelta) < 0.5) return;
+    e.preventDefault();
+    setCamera(cameraRef.current + horizontalDelta);
+  };
+
+  const onKeyDown = (e: KeyboardEvent<HTMLCanvasElement>) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && e.key !== 'Home' && e.key !== 'End') return;
+    e.preventDefault();
+    const canvas = ref.current;
+    const viewport = canvas?.getBoundingClientRect().width ?? 0;
+    if (e.key === 'Home') setCamera(0);
+    else if (e.key === 'End') setCamera(viewport * (WORLD_WIDTH_FACTOR - 1));
+    else setCamera(cameraRef.current + (e.key === 'ArrowRight' ? viewport * 0.22 : -viewport * 0.22));
   };
 
   return (
@@ -1211,12 +1948,29 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
       <canvas
         ref={ref}
         className="eco-scene-canvas"
+        tabIndex={0}
         role="img"
         aria-label="阳光和流云下的黄石河谷，灰狼、美洲赤鹿与野兔穿过草丛，游鱼在水中摆尾"
         onMouseMove={onMove}
         onClick={onClick}
         onMouseLeave={onLeave}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endPointerDrag}
+        onPointerCancel={endPointerDrag}
+        onWheel={onWheel}
+        onKeyDown={onKeyDown}
       />
+      <div className="eco-pan-hud" aria-hidden="true">
+          <span className="eco-pan-hud__hint">拖动浏览拉马谷</span>
+          <span className="eco-pan-hud__track">
+            <span
+              className="eco-pan-hud__thumb"
+              style={{ left: `${cameraProgress * 100}%` }}
+            />
+          </span>
+        <span className="eco-pan-hud__keys">← →</span>
+      </div>
       {tooltip && (
         <div
           className="eco-tooltip"

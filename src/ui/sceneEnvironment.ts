@@ -23,8 +23,10 @@ export const SEASON_PALETTES: Readonly<Record<SceneSeason, SeasonPalette>> = {
     carpet: [129, 199, 132], carpetAlpha: 0.2, tint: [255, 230, 145], tintAlpha: 0.025, snow: 0,
   },
   autumn: {
-    skyTop: [255, 204, 128], skyBottom: [255, 224, 178], far: [161, 136, 127], near: [215, 204, 200],
-    carpet: [255, 152, 0], carpetAlpha: 0.12, tint: [205, 139, 93], tintAlpha: 0.09, snow: 0,
+    // Lamar Valley autumn is generally cool and hazy with restrained gold in
+    // the grass, rather than a saturated orange wash over the whole sky.
+    skyTop: [168, 195, 207], skyBottom: [238, 226, 198], far: [145, 145, 142], near: [193, 181, 151],
+    carpet: [205, 175, 111], carpetAlpha: 0.1, tint: [188, 151, 112], tintAlpha: 0.045, snow: 0,
   },
   winter: {
     skyTop: [144, 202, 249], skyBottom: [236, 239, 241], far: [144, 164, 174], near: [236, 239, 241],

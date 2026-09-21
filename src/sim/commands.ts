@@ -2,7 +2,7 @@ import type { EcosystemState, SimCommand, SpeciesKey } from './types';
 import { SEASON_LABELS, SPECIES_LABELS, SEASON_ORDER } from './types';
 import { clampState, BOUNDS } from './bounds';
 import { pushLog } from './state';
-import { tick, tickMany } from './tick';
+import { TICKS_PER_SEASON, tick, tickMany } from './tick';
 import { enqueueFireCascade, enqueueWolfCascade } from './cascade';
 
 export interface ApplyResult {
@@ -101,7 +101,7 @@ export function applyCommand(state: EcosystemState, command: SimCommand): ApplyR
       const targetIdx = SEASON_ORDER.indexOf(target);
       let forward = (targetIdx - currentIdx + 4) % 4;
       if (forward === 0) forward = 4;
-      const ticksPerSeason = 8;
+      const ticksPerSeason = TICKS_PER_SEASON;
       const posInSeason = state.tick % ticksPerSeason;
       let steps = forward * ticksPerSeason - posInSeason;
       if (steps <= 0) steps = ticksPerSeason;
