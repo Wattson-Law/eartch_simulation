@@ -18,6 +18,12 @@ assert.match(scene, /advanceSeasonVisual\(visualSeason/, 'Season changes must us
 assert.match(scene, /approachVisual\(visualRain/, 'Rainfall must ease toward its target');
 assert.match(scene, /approachVisual\(visualFire/, 'Fire coverage must ease toward its target');
 assert.match(scene, /activity === 'feed'/, 'Feed activity must have a dedicated visual gesture');
+assert.match(scene, /activityName === 'caught'/, 'Caught activity must have a dedicated visual pose');
+assert.match(scene, /cartoonCaught/, 'Only the caught rabbit receives the cartoon X-eye overlay');
+assert.match(scene, /activityName === 'sit'/, 'Sit activity must have a dedicated stationary pose');
+assert.match(scene, /environmentPaletteAt\(visualSeason, visualDay\)/, 'Season and day lighting must blend continuously');
+assert.match(scene, /advanceDayVisual\(visualDay/, 'Daylight changes must use a continuous visual position');
+assert.match(scene, /dayPaletteAt\(visualDay\)/, 'Renderer must consume the day palette');
 assert.match(scene, /rainStrength/, 'Rain telemetry must expose a continuous intensity');
 assert.match(scene, /snowStrength/, 'Snow telemetry must expose a continuous intensity');
 assert.match(css, /@keyframes transition-orbit-zoom/, 'Orbital handoff needs a zoom animation');

@@ -1,5 +1,7 @@
 export type SceneSeason = 'spring' | 'summer' | 'autumn' | 'winter';
 export type SceneRgb = readonly [number, number, number];
+export type SceneDayPhase = 'dawn' | 'morning' | 'noon' | 'evening' | 'night';
+export type DayPhase = SceneDayPhase;
 
 export interface SeasonPalette {
   skyTop: SceneRgb;
@@ -12,6 +14,33 @@ export interface SeasonPalette {
   tintAlpha: number;
   snow: number;
 }
+
+/**
+ * Lighting values are deliberately independent from the season palette. This
+ * keeps the existing four-season API stable while allowing a day clock to
+ * ease the entire scene continuously through sunrise, noon, dusk and night.
+ */
+export interface DayPalette {
+  skyTop: SceneRgb;
+  skyBottom: SceneRgb;
+  farLight: SceneRgb;
+  nearLight: SceneRgb;
+  cloud: SceneRgb;
+  cloudAlpha: number;
+  sun: SceneRgb;
+  sunAlpha: number;
+  moon: SceneRgb;
+  moonAlpha: number;
+  starAlpha: number;
+  horizonGlow: SceneRgb;
+  horizonGlowAlpha: number;
+  ambientLight: number;
+  shadow: number;
+  warmth: number;
+  sunElevation: number;
+}
+
+export interface SceneEnvironmentPalette extends SeasonPalette, DayPalette {}
 
 export const SEASON_PALETTES: Readonly<Record<SceneSeason, SeasonPalette>> = {
   spring: {
@@ -35,6 +64,48 @@ export const SEASON_PALETTES: Readonly<Record<SceneSeason, SeasonPalette>> = {
 } as const;
 
 export const SCENE_SEASONS: readonly SceneSeason[] = ['spring', 'summer', 'autumn', 'winter'];
+export const SCENE_DAY_PHASES: readonly SceneDayPhase[] = ['dawn', 'morning', 'noon', 'evening', 'night'];
+export const DAY_PHASES = SCENE_DAY_PHASES;
+export const DAY_PHASE_LABELS: Readonly<Record<SceneDayPhase, string>> = {
+  dawn: '清晨',
+  morning: '上午',
+  noon: '中午',
+  evening: '傍晚',
+  night: '夜间',
+} as const;
+
+const DAY_PALETTES: Readonly<Record<SceneDayPhase, DayPalette>> = {
+  dawn: {
+    skyTop: [93, 119, 163], skyBottom: [244, 182, 143], farLight: [139, 153, 165], nearLight: [183, 164, 133],
+    cloud: [244, 222, 212], cloudAlpha: 0.76, sun: [255, 190, 112], sunAlpha: 0.84,
+    moon: [201, 215, 231], moonAlpha: 0.32, starAlpha: 0.12, horizonGlow: [255, 190, 120], horizonGlowAlpha: 0.42,
+    ambientLight: 0.74, shadow: 0.34, warmth: 0.72, sunElevation: 0.16,
+  },
+  morning: {
+    skyTop: [93, 177, 224], skyBottom: [224, 239, 220], farLight: [151, 187, 175], nearLight: [183, 201, 143],
+    cloud: [249, 246, 230], cloudAlpha: 0.82, sun: [255, 232, 166], sunAlpha: 0.9,
+    moon: [201, 215, 231], moonAlpha: 0.06, starAlpha: 0, horizonGlow: [246, 221, 167], horizonGlowAlpha: 0.18,
+    ambientLight: 0.9, shadow: 0.2, warmth: 0.42, sunElevation: 0.48,
+  },
+  noon: {
+    skyTop: [79, 195, 247], skyBottom: [255, 245, 157], farLight: [168, 198, 178], nearLight: [190, 210, 133],
+    cloud: [255, 252, 237], cloudAlpha: 0.88, sun: [255, 241, 180], sunAlpha: 0.98,
+    moon: [201, 215, 231], moonAlpha: 0, starAlpha: 0, horizonGlow: [255, 239, 160], horizonGlowAlpha: 0.1,
+    ambientLight: 1, shadow: 0.12, warmth: 0.28, sunElevation: 0.9,
+  },
+  evening: {
+    skyTop: [97, 113, 161], skyBottom: [235, 142, 111], farLight: [125, 122, 137], nearLight: [174, 139, 112],
+    cloud: [230, 196, 186], cloudAlpha: 0.7, sun: [255, 164, 88], sunAlpha: 0.75,
+    moon: [216, 224, 235], moonAlpha: 0.18, starAlpha: 0.04, horizonGlow: [255, 151, 93], horizonGlowAlpha: 0.5,
+    ambientLight: 0.68, shadow: 0.4, warmth: 0.84, sunElevation: 0.2,
+  },
+  night: {
+    skyTop: [13, 25, 52], skyBottom: [44, 61, 83], farLight: [57, 71, 77], nearLight: [67, 82, 72],
+    cloud: [117, 132, 149], cloudAlpha: 0.28, sun: [255, 176, 96], sunAlpha: 0,
+    moon: [220, 231, 241], moonAlpha: 0.92, starAlpha: 0.78, horizonGlow: [89, 119, 150], horizonGlowAlpha: 0.16,
+    ambientLight: 0.3, shadow: 0.68, warmth: 0.08, sunElevation: -0.32,
+  },
+} as const;
 
 function mixNumber(a: number, b: number, amount: number) {
   return a + (b - a) * amount;
@@ -54,6 +125,32 @@ function normalizeSeasonPosition(value: number) {
 
 export function seasonPosition(season: SceneSeason) {
   return SCENE_SEASONS.indexOf(season);
+}
+
+export function dayPhasePosition(phase: SceneDayPhase) {
+  return SCENE_DAY_PHASES.indexOf(phase);
+}
+
+export function dayPhaseAt(position: number): SceneDayPhase {
+  return SCENE_DAY_PHASES[Math.floor(normalizeDayPosition(position))]!;
+}
+
+export function dayPhaseLabel(phase: SceneDayPhase) {
+  return DAY_PHASE_LABELS[phase];
+}
+
+function normalizeDayPosition(value: number) {
+  return ((value % SCENE_DAY_PHASES.length) + SCENE_DAY_PHASES.length) % SCENE_DAY_PHASES.length;
+}
+
+/** Move through the shortest path around the dawn-to-night cycle. */
+export function advanceDayVisual(current: number, target: SceneDayPhase, delta: number, response = 2.2) {
+  const targetPosition = dayPhasePosition(target);
+  const currentPosition = normalizeDayPosition(current);
+  let difference = targetPosition - currentPosition;
+  if (difference > SCENE_DAY_PHASES.length / 2) difference -= SCENE_DAY_PHASES.length;
+  if (difference < -SCENE_DAY_PHASES.length / 2) difference += SCENE_DAY_PHASES.length;
+  return current + difference * (1 - Math.exp(-Math.max(0, delta) * response));
 }
 
 /** Move through the shortest path around the four-season cycle. */
@@ -84,6 +181,57 @@ export function seasonPaletteAt(position: number): SeasonPalette {
     snow: mixNumber(from.snow, to.snow, amount),
   };
 }
+
+export function dayPaletteAt(position: number): DayPalette {
+  const normalized = normalizeDayPosition(position);
+  const fromIndex = Math.floor(normalized);
+  const amount = normalized - fromIndex;
+  const from = DAY_PALETTES[SCENE_DAY_PHASES[fromIndex]!]!;
+  const to = DAY_PALETTES[SCENE_DAY_PHASES[(fromIndex + 1) % SCENE_DAY_PHASES.length]!]!;
+  return {
+    skyTop: mixRgb(from.skyTop, to.skyTop, amount),
+    skyBottom: mixRgb(from.skyBottom, to.skyBottom, amount),
+    farLight: mixRgb(from.farLight, to.farLight, amount),
+    nearLight: mixRgb(from.nearLight, to.nearLight, amount),
+    cloud: mixRgb(from.cloud, to.cloud, amount),
+    cloudAlpha: mixNumber(from.cloudAlpha, to.cloudAlpha, amount),
+    sun: mixRgb(from.sun, to.sun, amount),
+    sunAlpha: mixNumber(from.sunAlpha, to.sunAlpha, amount),
+    moon: mixRgb(from.moon, to.moon, amount),
+    moonAlpha: mixNumber(from.moonAlpha, to.moonAlpha, amount),
+    starAlpha: mixNumber(from.starAlpha, to.starAlpha, amount),
+    horizonGlow: mixRgb(from.horizonGlow, to.horizonGlow, amount),
+    horizonGlowAlpha: mixNumber(from.horizonGlowAlpha, to.horizonGlowAlpha, amount),
+    ambientLight: mixNumber(from.ambientLight, to.ambientLight, amount),
+    shadow: mixNumber(from.shadow, to.shadow, amount),
+    warmth: mixNumber(from.warmth, to.warmth, amount),
+    sunElevation: mixNumber(from.sunElevation, to.sunElevation, amount),
+  };
+}
+
+/**
+ * Blend seasonal ground colours with the day lighting layer. The returned
+ * object is useful to a renderer that wants one stable palette per frame.
+ */
+export function environmentPaletteAt(seasonPositionValue: number, dayPosition: number): SceneEnvironmentPalette {
+  const season = seasonPaletteAt(seasonPositionValue);
+  const day = dayPaletteAt(dayPosition);
+  const dayMix = 0.58;
+  const lightMix = 0.34;
+  return {
+    ...season,
+    ...day,
+    skyTop: mixRgb(season.skyTop, day.skyTop, dayMix),
+    skyBottom: mixRgb(season.skyBottom, day.skyBottom, dayMix),
+    far: mixRgb(season.far, day.farLight, lightMix),
+    near: mixRgb(season.near, day.nearLight, lightMix),
+    tint: mixRgb(season.tint, day.horizonGlow, Math.min(0.42, day.horizonGlowAlpha)),
+    tintAlpha: Math.max(season.tintAlpha, day.horizonGlowAlpha * 0.22),
+  };
+}
+
+/** Alias for callers that prefer the shorter scene-oriented name. */
+export const scenePaletteAt = environmentPaletteAt;
 
 export function approachVisual(current: number, target: number, delta: number, response = 4) {
   return current + (target - current) * (1 - Math.exp(-Math.max(0, delta) * response));

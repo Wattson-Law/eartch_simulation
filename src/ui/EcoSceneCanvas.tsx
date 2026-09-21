@@ -6,6 +6,7 @@ import {
   WILDLIFE_COVER_PATCHES,
   WILDLIFE_ACTIVITY_LABELS,
   WILDLIFE_LABELS,
+  isRiverWater,
   riverProfileAt,
   riverBankVariation,
   riverBankCove,
@@ -33,10 +34,16 @@ import {
   fishPosition,
   drawFish as drawSceneFish,
   advanceSeasonVisual,
+  advanceDayVisual,
   approachVisual,
   rgba,
-  seasonPaletteAt,
+  dayPaletteAt,
+  dayPhaseAt,
+  dayPhaseLabel,
+  dayPhasePosition,
+  environmentPaletteAt,
   seasonPosition,
+  type SceneDayPhase,
   type FishRoute,
   type SeasonPalette,
 } from './sceneEnvironment';
@@ -68,6 +75,8 @@ interface VisualPose {
   actionTime: number;
   blend: number;
   movement: number;
+  sitBlend: number;
+  caughtBlend: number;
   facing: number;
   oldFacing: number;
   turnTime: number;
@@ -789,6 +798,68 @@ function drawPanoramaDepthDetails(
   ctx.restore();
 }
 
+/**
+ * Generated Yellowstone layers already contain their own painted ground, so
+ * winter needs a light, irregular cover pass instead of a flat white screen.
+ * Patches are sampled against the shared river mask and never paint over the
+ * water ribbon where the fish and current remain visible.
+ */
+function drawSeasonalSnowCover(
+  ctx: CanvasRenderingContext2D,
+  worldW: number,
+  h: number,
+  snow: number,
+  elapsed: number,
+) {
+  if (snow <= 0.01) return;
+  ctx.save();
+  ctx.lineCap = 'round';
+  for (let i = 0; i < 72; i++) {
+    const unitX = 0.015 + seeded(i, 966) * 0.97;
+    const unitY = 0.62 + seeded(i, 967) * 0.3;
+    if (isRiverWater(unitX, unitY, 0.006)) continue;
+    const px = unitX * worldW;
+    const py = unitY * h;
+    const rx = worldW * (0.012 + seeded(i, 968) * 0.032);
+    const ry = h * (0.004 + seeded(i, 969) * 0.012);
+    ctx.fillStyle = `rgba(239,246,247,${snow * (0.11 + seeded(i, 970) * 0.16)})`;
+    ctx.beginPath();
+    ctx.ellipse(px, py, rx, ry, seeded(i, 971) * 0.3 - 0.15, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // A few thin, broken caps catch the colder light along the two banks.
+  ctx.strokeStyle = `rgba(242,248,248,${snow * 0.32})`;
+  ctx.lineWidth = Math.max(1, h * 0.0022);
+  for (let i = 0; i < 26; i++) {
+    const unitX = 0.02 + seeded(i, 972) * 0.96;
+    const profile = riverProfileAt(unitX);
+    const variation = riverBankVariation(unitX);
+    const cove = riverBankCove(unitX);
+    const side = i % 2 === 0 ? -1 : 1;
+    const edge = side < 0
+      ? profile.center - profile.halfWidth * 1.28 * (1 + variation) + cove
+      : profile.center + profile.halfWidth * 1.62 * (1 - variation * 0.7) + cove * 0.6;
+    const x = unitX * worldW;
+    const y = edge * h + side * h * (0.008 + seeded(i, 973) * 0.012);
+    const span = worldW * (0.008 + seeded(i, 974) * 0.018);
+    ctx.beginPath();
+    ctx.moveTo(x - span, y);
+    ctx.quadraticCurveTo(x, y - side * h * 0.003, x + span, y + side * h * 0.001);
+    ctx.stroke();
+  }
+  // Snow glints move almost imperceptibly, keeping a winter frame alive while
+  // the larger ground patches remain anchored to the panorama.
+  ctx.fillStyle = `rgba(255,255,255,${snow * 0.3})`;
+  for (let i = 0; i < 22; i++) {
+    const sx = (seeded(i, 975) * worldW + elapsed * (3 + i % 4)) % worldW;
+    const sy = h * (0.18 + seeded(i, 976) * 0.62);
+    ctx.beginPath();
+    ctx.arc(sx, sy, 0.7 + (i % 3) * 0.35, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
 function identityFor(agent: WildlifeAgent) {
   const { kind } = agent;
   const num = Number(agent.id.match(/\d+/)?.[0] ?? 1);
@@ -907,6 +978,8 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
     const wildlife = createWildlifeWorld(stateRef.current);
     const visualPoses = new Map<string, VisualPose>();
     let visualSeason = seasonPosition(stateRef.current.season);
+    const initialDayPhase = (stateRef.current as EcosystemState & { dayPhase?: SceneDayPhase }).dayPhase;
+    let visualDay = initialDayPhase ? dayPhasePosition(initialDayPhase) : 2;
     let visualRain = stateRef.current.rainfall;
     let visualFire = stateRef.current.fire ? 1 : 0;
     let lastObservation = '';
@@ -918,10 +991,12 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
       chase: 5,
       flee: 5,
       pounce: 5,
+      caught: 9,
       stalk: 4,
       emerge: 3,
       roam: 2,
       alert: 2,
+      sit: 1,
       hide: 1,
       rest: 0,
     };
@@ -1032,33 +1107,72 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
       h: number,
       elapsed: number,
       overcast: boolean | number,
+      dayPalette: ReturnType<typeof dayPaletteAt>,
     ) => {
       const cloud = generatedProps.find((prop) => prop.id === 'cloud');
       const overcastStrength = typeof overcast === 'number' ? Math.max(0, Math.min(1, overcast)) : overcast ? 1 : 0;
       // The sun is an atmospheric layer, so it stays in the visible sky while
       // the valley itself pans underneath it.
       const sunX = cameraX + viewportW * 0.79;
-      const sunY = h * 0.15;
+      const sunY = h * (0.42 - dayPalette.sunElevation * 0.3);
       const radius = Math.max(18, viewportW * 0.033);
       ctx.save();
-      ctx.globalAlpha = 0.96 - overcastStrength * 0.28;
+      ctx.globalAlpha = dayPalette.sunAlpha * (0.96 - overcastStrength * 0.28);
       const halo = ctx.createRadialGradient(sunX, sunY, radius * 0.65, sunX, sunY, radius * 2.7);
-      halo.addColorStop(0, 'rgba(255,226,139,.58)');
-      halo.addColorStop(0.48, 'rgba(255,226,139,.16)');
-      halo.addColorStop(1, 'rgba(255,239,192,0)');
+      halo.addColorStop(0, rgba(dayPalette.sun, 0.58));
+      halo.addColorStop(0.48, rgba(dayPalette.sun, 0.16));
+      halo.addColorStop(1, rgba(dayPalette.sun, 0));
       ctx.fillStyle = halo;
       ctx.fillRect(sunX - radius * 2.8, sunY - radius * 2.8, radius * 5.6, radius * 5.6);
       const disk = ctx.createLinearGradient(sunX, sunY - radius, sunX, sunY + radius);
-      disk.addColorStop(0, '#fff0b5');
-      disk.addColorStop(1, '#efbd63');
+      disk.addColorStop(0, rgba(dayPalette.sun, 1));
+      disk.addColorStop(1, rgba(dayPalette.horizonGlow, 1));
       ctx.fillStyle = disk;
-      ctx.strokeStyle = '#b98b4e';
+      ctx.strokeStyle = rgba(dayPalette.horizonGlow, 0.72);
       ctx.lineWidth = Math.max(0.8, viewportW * 0.0012);
       ctx.beginPath();
       ctx.arc(sunX, sunY, radius, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
       ctx.restore();
+
+      // Stars and moon fade continuously with the same day palette. Keeping
+      // them in the viewport layer makes the night sky feel far away while
+      // the Yellowstone panorama continues to pan underneath.
+      if (dayPalette.starAlpha > 0.002 || dayPalette.moonAlpha > 0.002) {
+        ctx.save();
+        ctx.globalAlpha = dayPalette.starAlpha;
+        ctx.fillStyle = '#f8f2d5';
+        for (let star = 0; star < 42; star++) {
+          const starX = cameraX + (seeded(star, 1201) * 0.94 + 0.03) * viewportW;
+          const starY = (0.035 + seeded(star, 1202) * 0.3) * h;
+          const starSize = Math.max(0.6, viewportW * (0.0008 + seeded(star, 1203) * 0.0012));
+          // Keep the twinkle envelope positive so a star fades smoothly
+          // instead of being clamped abruptly when the sine wave is negative.
+          ctx.globalAlpha = dayPalette.starAlpha * (0.56 + 0.44 * ((Math.sin(elapsed * 1.4 + star) + 1) * 0.5));
+          ctx.beginPath();
+          ctx.arc(starX, starY, starSize, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+        const moonX = cameraX + viewportW * 0.67;
+        const moonY = h * (0.28 - dayPalette.sunElevation * 0.12);
+        const moonRadius = Math.max(10, viewportW * 0.018);
+        ctx.save();
+        ctx.globalAlpha = dayPalette.moonAlpha;
+        ctx.fillStyle = rgba(dayPalette.moon);
+        ctx.strokeStyle = rgba(dayPalette.moon, 0.7);
+        ctx.lineWidth = Math.max(0.6, viewportW * 0.0009);
+        ctx.beginPath();
+        ctx.arc(moonX, moonY, moonRadius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = rgba(dayPalette.skyTop, 0.72);
+        ctx.beginPath();
+        ctx.arc(moonX + moonRadius * 0.32, moonY - moonRadius * 0.12, moonRadius * 0.88, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
 
       CLOUDS.forEach((entry, index) => {
         // Clouds belong to the sky, so anchor them to the viewport rather
@@ -1086,13 +1200,13 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
         const y = entry.y * h + Math.sin(elapsed * 0.12 + index) * h * 0.002;
         const width = entry.width * viewportW;
         ctx.save();
-        ctx.globalAlpha = entry.opacity * (1 - overcastStrength * 0.18);
+        ctx.globalAlpha = entry.opacity * dayPalette.cloudAlpha * (1 - overcastStrength * 0.18);
         if (cloud?.img) {
           const height = width * cloud.img.naturalHeight / cloud.img.naturalWidth;
           ctx.drawImage(cloud.img, x - width / 2, y - height / 2, width, height);
         } else {
-          ctx.fillStyle = '#fff4da';
-          ctx.strokeStyle = '#b6ab93';
+          ctx.fillStyle = rgba(dayPalette.cloud);
+          ctx.strokeStyle = rgba(dayPalette.cloud, 0.7);
           ctx.lineWidth = Math.max(0.8, viewportW * 0.0012);
           ctx.beginPath();
           ctx.ellipse(x, y, width * 0.48, width * 0.13, 0, 0, Math.PI * 2);
@@ -1107,8 +1221,8 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
       // drift over the halo. It gives the valley a consistent light direction
       // without turning the sun into a hard sticker.
       ctx.save();
-      ctx.globalAlpha = (0.9 - overcastStrength * 0.22);
-      ctx.strokeStyle = 'rgba(245,204,122,.52)';
+      ctx.globalAlpha = dayPalette.sunAlpha * (0.9 - overcastStrength * 0.22);
+      ctx.strokeStyle = rgba(dayPalette.sun, 0.52);
       ctx.lineWidth = Math.max(0.7, viewportW * 0.0011);
       for (let ray = 0; ray < 8; ray++) {
         const angle = ray / 8 * Math.PI * 2;
@@ -1119,13 +1233,13 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
         ctx.lineTo(sunX + Math.cos(angle) * outer, sunY + Math.sin(angle) * outer);
         ctx.stroke();
       }
-      ctx.fillStyle = '#f7d889';
+      ctx.fillStyle = rgba(dayPalette.sun, 0.9);
       ctx.beginPath();
       ctx.arc(sunX, sunY, radius * 0.82, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
       if (overcastStrength > 0.001) {
-        ctx.fillStyle = `rgba(77,99,116,${overcastStrength * 0.12})`;
+        ctx.fillStyle = `rgba(77,99,116,${overcastStrength * 0.12 + dayPalette.shadow * 0.08})`;
         ctx.fillRect(0, 0, worldW, h * 0.62);
       }
     };
@@ -1148,12 +1262,18 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
       delta: number,
     ) => {
       const { kind, activity } = agent;
+      // Keep the renderer forward-compatible with the simulation's transient
+      // states while older saved worlds still only expose the original union.
+      const activityName = activity as string;
+      const caught = activityName === 'caught' || activityName === 'downed';
+      const cartoonCaught = caught && kind === 'rabbit';
+      const sitting = activityName === 'sit';
       const moving = Math.hypot(agent.vx, agent.vy * 0.5625) > 0.002;
       const running = activity === 'chase' || activity === 'flee';
       // Hiding, feeding and the brief pounce settle the body instead of
       // replaying a full locomotion clip. Only chase/flee gets a running
       // silhouette; ambient travel stays a slow walk or hop.
-      const concealed = activity === 'hide' || activity === 'pounce' || activity === 'feed';
+      const concealed = activity === 'hide' || activity === 'pounce' || activity === 'feed' || caught || sitting;
       const visualMoving = moving && !concealed;
       const action: EcosystemAction = visualMoving || running
         ? running ? 'run' : kind === 'rabbit' ? 'hop' : 'walk'
@@ -1164,7 +1284,20 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
       if (!current.img) return false;
       let pose = visualPoses.get(agent.id);
       if (!pose) {
-        pose = { action, previousAction: action, frame: 0, previousFrame: 0, actionTime: agent.phase % 1.5, blend: 1, movement: visualMoving ? 1 : 0, facing: agent.facing, oldFacing: agent.facing, turnTime: 1 };
+        pose = {
+          action,
+          previousAction: action,
+          frame: 0,
+          previousFrame: 0,
+          actionTime: agent.phase % 1.5,
+          blend: 1,
+          movement: visualMoving ? 1 : 0,
+          sitBlend: sitting ? 1 : 0,
+          caughtBlend: caught ? 1 : 0,
+          facing: agent.facing,
+          oldFacing: agent.facing,
+          turnTime: 1,
+        };
         visualPoses.set(agent.id, pose);
       }
       if (pose.action !== action) {
@@ -1182,6 +1315,8 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
       pose.actionTime += delta;
       pose.blend = Math.min(1, pose.blend + delta / 0.22);
       pose.movement += ((visualMoving ? 1 : 0) - pose.movement) * (1 - Math.exp(-delta * 12));
+      pose.sitBlend += ((sitting ? 1 : 0) - pose.sitBlend) * (1 - Math.exp(-delta * 7));
+      pose.caughtBlend += ((caught ? 1 : 0) - pose.caughtBlend) * (1 - Math.exp(-delta * 8));
       pose.turnTime = Math.min(1, pose.turnTime + delta / 0.32);
       const facing = pose.turnTime < 0.58 ? pose.oldFacing : pose.facing;
       // Keep the body readable while it arcs through a turn. A small heading
@@ -1209,17 +1344,38 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
       const pounce = activity === 'pounce' ? Math.sin(Math.min(1, agent.activityTime / 0.8) * Math.PI) * desiredHeight * 0.028 : 0;
       const breath = Math.sin(elapsed * 2.1 + agent.phase) * 0.007 * (1 - pose.movement);
       const weight = kind !== 'rabbit' ? Math.abs(strideWave) * desiredHeight * (running ? 0.025 : 0.012) * pose.movement : 0;
+      // Resting animals lower their center of mass. A caught rabbit settles
+      // onto its side and remains readable for the short post-capture beat.
+      const sitDrop = desiredHeight * (kind === 'rabbit' ? 0.08 : 0.12) * pose.sitBlend;
+      const caughtDrop = desiredHeight * (kind === 'rabbit' ? 0.22 : 0.17) * pose.caughtBlend;
+      const caughtTilt = facing * (kind === 'rabbit' ? 0.46 : 0.28) * pose.caughtBlend;
       target.save();
       target.globalAlpha = agent.opacity;
       target.fillStyle = 'rgba(48,69,51,0.17)';
       target.beginPath();
-      target.ellipse(x, y + 1, desiredHeight * (kind === 'rabbit' ? 0.36 : 0.49), desiredHeight * 0.06, 0, 0, Math.PI * 2);
+      target.ellipse(
+        x,
+        y + 1,
+        desiredHeight * (kind === 'rabbit' ? 0.36 + pose.caughtBlend * 0.12 : 0.49 + pose.caughtBlend * 0.08),
+        desiredHeight * (0.06 + pose.caughtBlend * 0.015),
+        0,
+        0,
+        Math.PI * 2,
+      );
       target.fill();
-      target.translate(x, y - hop - pounce - weight);
+      target.translate(x, y - hop - pounce - weight + sitDrop + caughtDrop);
       const nibble = activity === 'graze' || activity === 'feed' || activity === 'drink';
       const pitch = activity === 'stalk' ? 0.025 : activity === 'feed' ? 0.09 : activity === 'drink' ? 0.075 : activity === 'graze' ? 0.055 : 0;
-      target.rotate(facing * (pitch + (nibble ? Math.sin(elapsed * 4 + agent.phase) * 0.012 : 0)) + headingLean + shoulderTurn);
-      target.scale(turnScale, 1 + breath - (activity === 'stalk' ? 0.055 : 0));
+      target.rotate(
+        caughtTilt
+        + facing * (pitch + (nibble ? Math.sin(elapsed * 4 + agent.phase) * 0.012 : 0))
+        + headingLean
+        + shoulderTurn,
+      );
+      target.scale(
+        turnScale * (1 + pose.caughtBlend * 0.04 - pose.sitBlend * 0.06),
+        (1 + breath - (activity === 'stalk' ? 0.055 : 0)) * (1 - pose.caughtBlend * 0.28 - pose.sitBlend * 0.1),
+      );
       const drawPose = (
         sheet: ReturnType<typeof sheetFor>,
         frame: number,
@@ -1255,7 +1411,81 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
       } else {
         drawPose(current, pose.frame, blend, facing);
       }
+      // The X eyes are deliberately drawn as a simple graphic overlay. It
+      // keeps the capture beat legible at small canvas sizes without blood or
+      // a separate sprite sheet, and fades with the same animal opacity.
+      if (cartoonCaught && pose.caughtBlend > 0.02 && agent.opacity > 0.08) {
+        const faceX = facing * desiredHeight * 0.2;
+        const faceY = -desiredHeight * 0.37;
+        const markSize = Math.max(2.2, desiredHeight * 0.065);
+        target.save();
+        target.globalAlpha = agent.opacity * pose.caughtBlend * 0.92;
+        target.strokeStyle = '#2f2928';
+        target.lineWidth = Math.max(1.1, markSize * 0.22);
+        target.lineCap = 'round';
+        for (const offset of [-markSize * 0.62, markSize * 0.62]) {
+          target.beginPath();
+          target.moveTo(faceX + offset - markSize * 0.42, faceY - markSize * 0.42);
+          target.lineTo(faceX + offset + markSize * 0.42, faceY + markSize * 0.42);
+          target.moveTo(faceX + offset + markSize * 0.42, faceY - markSize * 0.42);
+          target.lineTo(faceX + offset - markSize * 0.42, faceY + markSize * 0.42);
+          target.stroke();
+        }
+        target.restore();
+      }
       target.restore();
+
+      // A quiet seated animal needs a readable weight cue even when the
+      // source sheet only provides an upright idle frame. These restrained
+      // haunch and tucked-paw marks sit under the silhouette's outline, so a
+      // rabbit, elk, or wolf reads as settled on its haunches instead of a
+      // standing sprite that simply stopped moving.
+      if (sitting && pose.sitBlend > 0.02 && agent.opacity > 0.35) {
+        const sit = pose.sitBlend;
+        const h = desiredHeight;
+        const seatX = x - facing * h * (kind === 'rabbit' ? 0.035 : 0.018);
+        const seatY = y - h * (kind === 'rabbit' ? 0.16 : 0.11);
+        const ink = kind === 'rabbit'
+          ? 'rgba(100,73,62,0.48)'
+          : kind === 'deer'
+            ? 'rgba(92,70,52,0.34)'
+            : 'rgba(40,53,70,0.38)';
+        target.save();
+        target.globalAlpha = agent.opacity * sit;
+        target.lineCap = 'round';
+        target.lineJoin = 'round';
+        target.lineWidth = Math.max(0.8, h * 0.016);
+        target.strokeStyle = ink;
+        target.fillStyle = kind === 'rabbit' ? 'rgba(154,112,84,0.16)' : 'rgba(58,68,73,0.12)';
+        target.beginPath();
+        target.ellipse(
+          seatX,
+          seatY,
+          h * (kind === 'rabbit' ? 0.19 : 0.27),
+          h * (kind === 'rabbit' ? 0.12 : 0.14),
+          facing * 0.08,
+          0,
+          Math.PI * 2,
+        );
+        target.fill();
+        target.beginPath();
+        target.moveTo(x + facing * h * 0.06, y - h * (kind === 'rabbit' ? 0.26 : 0.3));
+        target.quadraticCurveTo(
+          x + facing * h * (kind === 'rabbit' ? 0.12 : 0.16),
+          y - h * 0.1,
+          x + facing * h * 0.08,
+          y - h * 0.015,
+        );
+        target.moveTo(x + facing * h * 0.13, y - h * (kind === 'rabbit' ? 0.25 : 0.28));
+        target.quadraticCurveTo(
+          x + facing * h * 0.19,
+          y - h * 0.09,
+          x + facing * h * 0.13,
+          y - h * 0.01,
+        );
+        target.stroke();
+        target.restore();
+      }
 
       // Sprite sheets carry the broad silhouette. These small overlays make
       // the intent of a gesture readable even when the source clip is idle:
@@ -1421,14 +1651,24 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
       const motionDelta = !s.paused && !reducedMotion && !document.hidden ? delta : 0;
       animationSeconds += motionDelta;
       stepWildlife(wildlife, motionDelta, s);
+      const requestedDayPhase = (s as EcosystemState & { dayPhase?: SceneDayPhase }).dayPhase;
       if (reducedMotion) {
         // Deliberate commands still need to be visible when the user asks for
         // reduced motion; only the interpolation itself is removed.
         visualSeason = seasonPosition(s.season);
+        if (requestedDayPhase) visualDay = dayPhasePosition(requestedDayPhase);
         visualRain = s.rainfall;
         visualFire = s.fire ? 1 : 0;
       } else {
         visualSeason = advanceSeasonVisual(visualSeason, s.season, motionDelta);
+        if (requestedDayPhase) {
+          visualDay = advanceDayVisual(visualDay, requestedDayPhase, motionDelta);
+        } else {
+          // The core simulator has no clock field yet, so the scene carries a
+          // quiet visual clock of its own. It starts at noon for a clear first
+          // frame and takes roughly five minutes to visit every lighting phase.
+          visualDay = (visualDay + motionDelta * 0.018) % 5;
+        }
         visualRain = approachVisual(visualRain, s.rainfall, motionDelta, 2.8);
         visualFire = approachVisual(visualFire, s.fire ? 1 : 0, motionDelta, 4.8);
       }
@@ -1449,7 +1689,8 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       }
 
-      const palette = seasonPaletteAt(visualSeason);
+      const palette = environmentPaletteAt(visualSeason, visualDay);
+      const dayPalette = dayPaletteAt(visualDay);
       const rainOvercast = Math.max(0, Math.min(1, (visualRain - 0.45) / 0.55));
       const seasonCyclePosition = ((visualSeason % 4) + 4) % 4;
       const vegetationFilter = visualFire > 0.001
@@ -1461,6 +1702,9 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
             : seasonCyclePosition > 0.8 && seasonCyclePosition < 1.8
               ? 'brightness(1.06) saturate(1.15)'
               : 'none';
+      const ambientBrightness = 0.82 + dayPalette.ambientLight * 0.18;
+      const ambientSaturation = 0.78 + dayPalette.ambientLight * 0.22;
+      const landscapeFilter = `${vegetationFilter === 'none' ? '' : `${vegetationFilter} `}brightness(${ambientBrightness}) saturate(${ambientSaturation})`.trim();
       ctx.save();
       ctx.beginPath();
       ctx.rect(0, 0, w, h);
@@ -1478,6 +1722,11 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
         // Use the approved Yellowstone art layers as the geographic anchor.
         // They are mirrored panel-by-panel so the river keeps its perspective
         // while the camera still has a genuinely wide field to explore.
+        // The generated art is a painted source layer, so apply the same
+        // seasonal and day-light exposure to every layer before adding the
+        // procedural fish, snow, sun and cloud passes.
+        ctx.save();
+        ctx.filter = landscapeFilter;
         drawMirroredPanoramaLayer(ctx, generatedLayers.mountains, worldW, h, 0.96, h * 0.64);
         drawMirroredPanoramaLayer(ctx, generatedLayers.meadow, worldW, h, 0.9);
         drawMirroredPanoramaLayer(ctx, generatedLayers.forestBack, worldW, h, 0.72, h * 0.74);
@@ -1486,12 +1735,14 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
         // the river is drawn once as a continuous ribbon below.
         drawContinuousGeneratedRiver(ctx, worldW, h, elapsed);
         drawMirroredPanoramaLayer(ctx, generatedLayers.foreground, worldW, h, 0.88);
+        ctx.restore();
         drawPanoramaDepthDetails(ctx, worldW, h, palette, elapsed);
+        drawSeasonalSnowCover(ctx, worldW, h, palette.snow, elapsed);
         // The generated panels contain a static cloud pass; the living sky is
         // drawn last so the sun and cloud drift remain animated and pausable.
-        drawSkyMotion(ctx, worldW, w, cameraRef.current, h, elapsed, rainOvercast);
+        drawSkyMotion(ctx, worldW, w, cameraRef.current, h, elapsed, rainOvercast, dayPalette);
       } else {
-        drawSkyMotion(ctx, worldW, w, cameraRef.current, h, elapsed, rainOvercast);
+        drawSkyMotion(ctx, worldW, w, cameraRef.current, h, elapsed, rainOvercast, dayPalette);
         drawLamarLandscape(ctx, worldW, h, palette, s.grass, visualFire);
       }
 
@@ -1511,6 +1762,17 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
           ctx.globalAlpha = visualFire * 0.16;
           ctx.fillRect(0, h * 0.42, worldW, h * 0.58);
         }
+        ctx.restore();
+      }
+      if (dayPalette.shadow > 0.02) {
+        // Generated Yellowstone layers are intentionally bright source art.
+        // A shared low-opacity blue night veil keeps the valley, water and
+        // animals under one consistent moonlit exposure.
+        ctx.save();
+        ctx.fillStyle = rgba(dayPalette.skyTop, Math.min(0.48, dayPalette.shadow * 0.42));
+        ctx.fillRect(0, 0, worldW, h * 0.9);
+        ctx.fillStyle = rgba(dayPalette.horizonGlow, Math.min(0.08, dayPalette.horizonGlowAlpha * 0.18));
+        ctx.fillRect(0, h * 0.32, worldW, h * 0.58);
         ctx.restore();
       }
       if (generatedLandscape) drawGeneratedWaterMotion(ctx, worldW, h, elapsed);
@@ -1711,6 +1973,9 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
               fish: PANORAMA_FISH_ROUTES.map((route) => ({ ...fishPosition(route, elapsed), size: route.size })),
               time: elapsed,
               visualSeason,
+              visualDay,
+              dayPhase: Math.floor(((visualDay % 5) + 5) % 5),
+              dayPhaseName: dayPhaseLabel(dayPhaseAt(visualDay)),
               visualRain,
               visualFire,
               rainStrength: Math.max(0, Math.min(1, (visualRain - 0.45) / 0.55)),
@@ -1724,6 +1989,16 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
             }),
           });
         }
+      }
+
+      // The first moonlight wash tones the painted landscape. This smaller
+      // finishing veil also reaches fish, foliage and animal sprites so the
+      // night exposure reads as one scene instead of leaving bright cut-outs.
+      if (dayPalette.shadow > 0.02) {
+        ctx.save();
+        ctx.fillStyle = rgba(dayPalette.skyTop, Math.min(0.16, dayPalette.shadow * 0.18));
+        ctx.fillRect(0, 0, worldW, h * 0.9);
+        ctx.restore();
       }
 
       if (visualFire > 0.001) {

@@ -11,6 +11,12 @@ const {
   fishPosition,
   fitFishRoutes,
   advanceSeasonVisual,
+  advanceDayVisual,
+  dayPhasePosition,
+  dayPhaseAt,
+  dayPhaseLabel,
+  dayPaletteAt,
+  environmentPaletteAt,
   approachVisual,
   seasonPaletteAt,
   rgba,
@@ -18,6 +24,11 @@ const {
 
 assert.equal(advanceSeasonVisual(0, 'winter', 0), 0, 'A zero visual delta must keep the season position still');
 assert.ok(advanceSeasonVisual(3.8, 'spring', 0.25) > 3.8, 'Season interpolation should take the short wrapped path');
+assert.equal(dayPhasePosition('dawn'), 0, 'Dawn must anchor the day cycle');
+assert.equal(dayPhaseAt(4.99), 'night', 'Day phase lookup must wrap continuously at the cycle edge');
+assert.equal(dayPhaseLabel('evening'), '傍晚', 'Day phase labels must remain user-facing and localized');
+assert.equal(advanceDayVisual(0, 'dawn', 0), 0, 'A zero visual delta must keep the day position still');
+assert.ok(advanceDayVisual(4.8, 'dawn', 0.25) > 4.8, 'Day interpolation should take the short wrapped path');
 assert.ok(approachVisual(0, 1, 0.4, 3) > 0 && approachVisual(0, 1, 0.4, 3) < 1, 'Visual approach must stay below its target');
 assert.ok(approachVisual(1, 0, 0.4, 3) > 0 && approachVisual(1, 0, 0.4, 3) < 1, 'Visual approach must stay above its target');
 for (const position of [0, 0.5, 1.5, 2.5, 3.99, -0.25]) {
@@ -27,6 +38,27 @@ for (const position of [0, 0.5, 1.5, 2.5, 3.99, -0.25]) {
   }
   assert.ok(palette.snow >= 0 && palette.snow <= 1, 'Snow interpolation stays within 0–1');
 }
+for (const position of [0, 0.5, 1.5, 2.5, 3.99, 4.99, -0.25]) {
+  const palette = dayPaletteAt(position);
+  for (const channel of [
+    ...palette.skyTop, ...palette.skyBottom, ...palette.farLight, ...palette.nearLight,
+    ...palette.cloud, ...palette.sun, ...palette.moon, ...palette.horizonGlow,
+  ]) {
+    assert.ok(channel >= 0 && channel <= 255, 'Daylight colour channels stay in byte range');
+  }
+  for (const value of [
+    palette.cloudAlpha, palette.sunAlpha, palette.moonAlpha, palette.starAlpha,
+    palette.horizonGlowAlpha, palette.ambientLight, palette.shadow, palette.warmth,
+  ]) {
+    assert.ok(value >= 0 && value <= 1, 'Daylight opacity and lighting values stay normalized');
+  }
+  assert.ok(palette.sunElevation >= -1 && palette.sunElevation <= 1, 'Sun elevation stays normalized');
+}
+assert.ok(dayPaletteAt(2).sunAlpha > dayPaletteAt(4).sunAlpha, 'Noon must be brighter than night');
+assert.ok(dayPaletteAt(4).starAlpha > dayPaletteAt(2).starAlpha, 'Night must expose stars');
+const merged = environmentPaletteAt(1.5, 2);
+assert.ok(merged.skyTop[2] > merged.skyTop[0], 'Merged noon sky keeps a cool blue bias');
+assert.ok(merged.far[0] >= 0 && merged.far[0] <= 255, 'Merged seasonal/day palette remains valid');
 assert.equal(rgba([12.4, 34.6, 255.2], 1.4), 'rgba(12,35,255,1)', 'RGBA helper clamps alpha and rounds channels');
 
 for (const [index, cloud] of CLOUDS.entries()) {

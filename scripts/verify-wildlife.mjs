@@ -133,6 +133,8 @@ function forceRecoverCaught(kind, position) {
 {
   assert.equal(WILDLIFE_LABELS.wolf, '灰狼', 'species labels remain separate');
   assert.equal(WILDLIFE_ACTIVITY_LABELS.pounce, '扑击', 'activity labels export for renderer');
+  assert.equal(WILDLIFE_ACTIVITY_LABELS.caught, '倒地', 'caught activity label is exported for renderer');
+  assert.equal(WILDLIFE_ACTIVITY_LABELS.sit, '坐卧', 'sit activity label is exported for renderer');
   assert.equal(WILDLIFE_ACTIVITY_LABELS.emerge, '探出', 'cover emergence label is exported');
   assert.deepEqual(
     WILDLIFE_COVER_PATCHES.map(({ id, x, y, rx, ry }) => ({ id, x, y, rx, ry })),
@@ -343,6 +345,7 @@ function forceRecoverCaught(kind, position) {
   const s = state();
   const world = createWildlifeWorld(s);
   const phases = new Set();
+  let caughtActivitySeen = false;
   const consumedTicks = new Set();
   const caughtStarts = [];
   const escapedStarts = [];
@@ -384,6 +387,10 @@ function forceRecoverCaught(kind, position) {
       phases.add(world.hunt.phase);
       if (world.hunt.consumedTick != null) consumedTicks.add(world.hunt.consumedTick);
       const prey = world.agents.find((a) => a.id === world.hunt.preyId);
+      caughtActivitySeen ||= prey?.activity === 'caught';
+      if (prey?.activity === 'caught') {
+        assert.equal(Math.hypot(prey.vx, prey.vy), 0, 'caught prey holds still during the downed beat');
+      }
       if (prey) minOpacityByPrey.set(prey.id, Math.min(minOpacityByPrey.get(prey.id) ?? 1, prey.opacity));
       if (world.hunt.phase === 'pounce' && firstSuccessfulHuntAt == null) firstSuccessfulHuntAt = t;
     }
@@ -422,6 +429,7 @@ function forceRecoverCaught(kind, position) {
   assert(phases.has('chase'), 'long run observes chase');
   assert(phases.has('pounce'), 'long run observes pounce');
   assert(phases.has('feed'), 'long run observes feed');
+  assert(caughtActivitySeen, 'successful catches expose a stationary caught activity before recovery');
   assert(caughtCount >= 1, 'long run records a real caught sequence');
   assert(escapedStarts.filter(Boolean).length > caughtCount, 'most long-run encounters resolve as escapes');
   assert([...minOpacityByPrey.values()].some((v) => v <= 0.02), 'caught prey becomes visually hidden');
@@ -440,6 +448,33 @@ function forceRecoverCaught(kind, position) {
       .map((seconds) => seconds.toFixed(2))
       .join(', ')}s`,
   );
+}
+
+// Mirror the real app's reporting cadence: the macro model only publishes a
+// visible predation event every eight simulation ticks. The first published
+// rabbit event must still reach the readable caught pose through the normal
+// entry flow; otherwise the X-eye animation is technically implemented but
+// practically unreachable for a new observer.
+{
+  const s = state();
+  const world = createWildlifeWorld(s);
+  let nextEventAt = 1.8;
+  let caughtRabbitAt = null;
+  for (let frame = 0; frame < 60 * 36; frame++) {
+    const t = frame / 60;
+    if (t + 1e-9 >= nextEventAt) {
+      s.tick += 1;
+      if (s.tick % 8 === 0) s.lastPredation = { prey: 'rabbits', amount: 1 };
+      nextEventAt += 1.8;
+    }
+    stepWildlife(world, 1 / 60, s);
+    if (world.hunt?.preyKind === 'rabbit' && world.observation.phase === 'caught' && caughtRabbitAt == null) {
+      caughtRabbitAt = t;
+    }
+  }
+  assert(caughtRabbitAt != null, 'the first real eight-step rabbit report reaches a caught pose');
+  assert(caughtRabbitAt <= 36, `the first real rabbit catch remains observable (${caughtRabbitAt?.toFixed(2)}s)`);
+  console.log(`real report cadence evidence: rabbit caught pose at ${caughtRabbitAt.toFixed(2)}s`);
 }
 
 {
@@ -495,18 +530,24 @@ function forceRecoverCaught(kind, position) {
   let maxAmbientSpeed = 0;
   let sawHide = false;
   let sawEmerge = false;
+  let sawSit = false;
+  let maxSitSpeed = 0;
   for (let frame = 0; frame < 60 * 28; frame++) {
     stepWildlife(world, 1 / 60, s);
     for (const agent of world.agents) {
       maxAmbientSpeed = Math.max(maxAmbientSpeed, Math.hypot(agent.vx, agent.vy));
       sawHide ||= agent.activity === 'hide';
       sawEmerge ||= agent.activity === 'emerge';
+      sawSit ||= agent.activity === 'sit';
+      if (agent.activity === 'sit') maxSitSpeed = Math.max(maxSitSpeed, Math.hypot(agent.vx, agent.vy));
       assert.equal(isRiverWater(agent.x, agent.y), false, `${agent.id} stays on the bank or meadow`);
     }
   }
   assert(maxAmbientSpeed < 0.075, `ambient movement stays slow (${maxAmbientSpeed.toFixed(4)})`);
   assert(sawHide, 'quiet wildlife uses a visible hide state');
   assert(sawEmerge, 'quiet wildlife transitions back out of cover');
+  assert(sawSit, 'quiet wildlife uses a visible stationary sit state');
+  assert(maxSitSpeed <= 1e-9, `sit activity remains stationary (${maxSitSpeed.toFixed(6)})`);
 }
 
 console.log('wildlife behavior regression passed');

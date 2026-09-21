@@ -4,6 +4,7 @@ export type WildlifeKind = 'rabbit' | 'deer' | 'wolf';
 
 export type WildlifeActivity =
   | 'rest'
+  | 'sit'
   | 'roam'
   | 'graze'
   | 'drink'
@@ -12,6 +13,7 @@ export type WildlifeActivity =
   | 'chase'
   | 'flee'
   | 'pounce'
+  | 'caught'
   | 'feed'
   | 'hide'
   | 'emerge';
@@ -190,6 +192,7 @@ export const WILDLIFE_LABELS: Record<WildlifeKind, string> = {
 
 export const WILDLIFE_ACTIVITY_LABELS: Record<WildlifeActivity, string> = {
   rest: '休息',
+  sit: '坐卧',
   roam: '游走',
   graze: '取食',
   drink: '饮水',
@@ -198,6 +201,7 @@ export const WILDLIFE_ACTIVITY_LABELS: Record<WildlifeActivity, string> = {
   chase: '追逐',
   flee: '逃离',
   pounce: '扑击',
+  caught: '倒地',
   feed: '进食',
   hide: '隐蔽',
   emerge: '探出',
@@ -502,25 +506,30 @@ function updateHunt(world: WildlifeWorld, dt: number, predationEvent: PendingPre
     }
   } else if (hunt.phase === 'pounce') {
     setActivity(predator, 'pounce');
-    setActivity(prey, 'hide');
+    // Successful prey stays visible in a short, readable downed beat so the
+    // renderer can show the fall before the body is taken into cover.
+    setActivity(prey, 'caught');
     predator.vx *= 0.72;
     predator.vy *= 0.72;
-    steerTo(prey, coverEntryPoint(prey), dt, recoveryCoverSpeed(prey) * 1.15);
     if (hunt.elapsed > 0.55) {
       setHuntPhase(hunt, 'feed', predator, prey);
     }
   } else if (hunt.phase === 'feed') {
     setActivity(predator, 'feed');
-    setActivity(prey, 'hide');
+    setActivity(prey, 'caught');
     predator.vx *= 0.82;
     predator.vy *= 0.82;
-    // The visible end of a successful hunt is the prey disappearing into
-    // cover, not a slapstick collision in open ground. Give it enough speed
-    // to reach the grass and fade only after its body is actually sheltered.
-    steerTo(prey, coverEntryPoint(prey), dt, recoveryCoverSpeed(prey) * 1.8);
+    // Hold the downed pose for the whole feed beat. The following
+    // recoverCaught phase handles the slow retreat into grass and the
+    // existing opacity transition, so no animal slides across open ground.
+    prey.vx = 0;
+    prey.vy = 0;
     prey.hiddenTime = hunt.elapsed;
-    if ((prey.cover ?? 0) > 0.36) {
-      prey.opacity = approach(prey.opacity, 0.01, dt * 18);
+    if (hunt.elapsed > 2.0) {
+      // Fade only after the readable downed beat. This preserves the
+      // caught-pose window while keeping the existing recovery contract,
+      // which expects an already concealed prey body.
+      prey.opacity = approach(prey.opacity, 0.01, dt * 4.8);
     }
     if (hunt.elapsed > 3.0) {
       setHuntPhase(hunt, 'recoverCaught', predator, prey);
@@ -645,6 +654,14 @@ function updateAmbientAgent(world: WildlifeWorld, agent: WildlifeAgent, dt: numb
     }
   }
 
+  if (agent.activity === 'sit') {
+    // Sitting/lying is a true stationary pose. Keeping this explicit prevents
+    // separation impulses or a stale velocity from making the pose skate.
+    agent.vx = 0;
+    agent.vy = 0;
+    return;
+  }
+
   if (agent.activity === 'rest' || agent.activity === 'graze' || agent.activity === 'alert') {
     agent.vx *= Math.max(0, 1 - dt * 3.5);
     agent.vy *= Math.max(0, 1 - dt * 3.5);
@@ -689,16 +706,18 @@ function chooseAmbientActivity(world: WildlifeWorld, agent: WildlifeAgent) {
   const anchor = isPanoramaAnchor(agent);
   if (agent.kind === 'wolf') {
     if (!anchor && roll < 0.1) {
+      if (roll < 0.035) return { activity: 'sit' as const, x: agent.x, y: agent.y };
       const cover = coverEntryPoint(agent);
       return { activity: 'hide' as const, x: cover.x, y: cover.y };
     }
-    const activity: WildlifeActivity = roll > 0.72 ? 'rest' : roll > 0.5 ? 'alert' : 'roam';
+    const activity: WildlifeActivity = roll > 0.72 ? 'rest' : roll > 0.5 ? 'alert' : roll > 0.1 ? 'roam' : 'sit';
     // Lamar wolves patrol an established territory around the forest edge;
     // keeping ambient goals near their home range prevents the whole pack
     // from drifting out of a wide panorama after a hunt.
     return { activity, ...randomWalkable(agent.seed ?? 1, world.time, agent.homeX ?? agent.x, agent.homeY ?? agent.y, anchor ? 0.075 : 0.14) };
   }
   const hideChance = agent.kind === 'rabbit' ? 0.18 : 0.14;
+  if (roll < 0.07) return { activity: 'sit' as const, x: agent.x, y: agent.y };
   if (!anchor && roll < hideChance) {
     const cover = coverEntryPoint(agent);
     return { activity: 'hide' as const, x: cover.x, y: cover.y };
@@ -717,6 +736,10 @@ function setActivity(agent: WildlifeAgent, activity: WildlifeActivity) {
   if (agent.activity === activity) return;
   agent.activity = activity;
   agent.activityTime = 0;
+  if (activity === 'sit' || activity === 'caught') {
+    agent.vx = 0;
+    agent.vy = 0;
+  }
 }
 
 function setHuntPhase(
@@ -736,10 +759,10 @@ function setHuntPhase(
     setActivity(prey, 'flee');
   } else if (phase === 'pounce') {
     setActivity(predator, 'pounce');
-    setActivity(prey, 'hide');
+    setActivity(prey, 'caught');
   } else if (phase === 'feed') {
     setActivity(predator, 'feed');
-    setActivity(prey, 'hide');
+    setActivity(prey, 'caught');
   } else if (phase === 'recoverCaught') {
     setActivity(predator, 'rest');
     setActivity(prey, 'hide');
@@ -987,8 +1010,8 @@ function applySeparation(agents: WildlifeAgent[], dt: number, hunt: HuntState | 
       // full flocking impulse during the hide/emerge transition can shove it
       // back into a river bank or cover patch, so let the transition finish
       // before restoring the normal spacing force.
-      const coverTransition = ['hide', 'emerge', 'rest', 'feed', 'pounce', 'recoverCaught'].includes(a.activity)
-        || ['hide', 'emerge', 'rest', 'feed', 'pounce', 'recoverCaught'].includes(b.activity);
+      const coverTransition = ['hide', 'emerge', 'rest', 'sit', 'caught', 'feed', 'pounce', 'recoverCaught'].includes(a.activity)
+        || ['hide', 'emerge', 'rest', 'sit', 'caught', 'feed', 'pounce', 'recoverCaught'].includes(b.activity);
       const push = ((wanted - d) / wanted) * dt * (coverTransition ? 0 : 0.42);
       a.vx += (dx / d) * push;
       a.vy += ((dy / d) * push) / (9 / 16);
@@ -1049,9 +1072,16 @@ function updateObservation(world: WildlifeWorld) {
       predatorId: world.hunt.predatorId,
       preyId: world.hunt.preyId,
     };
-  } else if (world.hunt.phase === 'pounce' || world.hunt.phase === 'feed') {
+  } else if (world.hunt.phase === 'pounce') {
     world.observation = {
-      text: '灰狼在高草边缘停住，猎物钻入草丛，植被截断了后半段视线。',
+      text: names ? `${names.prey}在高草边缘倒地，${names.predator}停住脚步，现场保持安静。` : '猎物在高草边缘倒地，灰狼停住脚步。',
+      phase: 'caught',
+      predatorId: world.hunt.predatorId,
+      preyId: world.hunt.preyId,
+    };
+  } else if (world.hunt.phase === 'feed') {
+    world.observation = {
+      text: names ? `${names.prey}短暂静止在草边，${names.predator}压低身体，植被遮住了细节。` : '猎物短暂静止在草边，植被遮住了细节。',
       phase: 'caught',
       predatorId: world.hunt.predatorId,
       preyId: world.hunt.preyId,
@@ -1169,7 +1199,7 @@ function gaitScale(kind: WildlifeKind, activity: WildlifeActivity) {
 
 function ambientDuration(agent: WildlifeAgent) {
   const roll = hash(agent.seed ?? 1, Math.floor(agent.phase * 0.3));
-  if (agent.activity === 'rest' || agent.activity === 'graze') return 3.2 + roll * 4.4;
+  if (agent.activity === 'rest' || agent.activity === 'sit' || agent.activity === 'graze') return 3.2 + roll * 4.4;
   if (agent.activity === 'alert') return 1.8 + roll * 2.4;
   return 3.8 + roll * 3.8;
 }
@@ -1183,11 +1213,17 @@ function catchDistance(kind: WildlifeKind) {
   return kind === 'deer' ? 0.045 : 0.038;
 }
 
+const FIRST_VISIBLE_PREDATION_TICK = 8;
+
 function plannedSuccess(prey: WildlifeAgent | undefined, tick: number) {
   if (!prey) return false;
-  // Keep the first observed macro event legible, then make successful hunts
-  // uncommon so most encounters resolve with a retreat into cover.
-  return tick <= 1 || hash(prey.seed ?? 1, tick) > 0.96;
+  // The population model reports predation every eight simulation steps. Keep
+  // that first field report legible in the UI, then make later successful
+  // hunts uncommon so most encounters resolve with a retreat into cover.
+  // Previously this used tick <= 1, a timeline that only existed in the unit
+  // harness; the real app's first report is tick 8 and therefore never showed
+  // the requested downed-rabbit beat through the normal entry flow.
+  return tick <= FIRST_VISIBLE_PREDATION_TICK || hash(prey.seed ?? 1, tick) > 0.96;
 }
 
 function angleDelta(from: number, to: number) {

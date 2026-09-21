@@ -663,6 +663,8 @@ button:focus-visible, input:focus-visible {
 .wildlife-status--chase .wildlife-status__dot,
 .wildlife-status--flee .wildlife-status__dot,
 .wildlife-status--pounce .wildlife-status__dot { background: #bd7657; box-shadow: 0 0 0 3px rgba(189, 118, 87, .16); }
+.wildlife-status--sit .wildlife-status__dot { background: #879b78; box-shadow: 0 0 0 3px rgba(135, 155, 120, .16); }
+.wildlife-status--caught .wildlife-status__dot { background: #9d6670; box-shadow: 0 0 0 3px rgba(157, 102, 112, .18); }
 
 /* —— 从宇宙入口进入黄石的短过渡 —— */
 .globe-to-eco-transition {
