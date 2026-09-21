@@ -1,11 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { WELCOME_MESSAGE, RANGER_NAME, RANGER_SHORT } from '../nlp';
-
-export interface ChatMessage {
-  id: number;
-  role: 'user' | 'admin';
-  text: string;
-}
+import { RANGER_NAME, RANGER_SHORT } from '../nlp';
+import type { ChatMessage } from './chatMessages';
 
 interface Props {
   messages: ChatMessage[];
@@ -95,8 +90,4 @@ export function ChatPanel({ messages, onSend, disabled }: Props) {
       </div>
     </aside>
   );
-}
-
-export function initialChatMessages(): ChatMessage[] {
-  return [{ id: 1, role: 'admin', text: WELCOME_MESSAGE }];
 }

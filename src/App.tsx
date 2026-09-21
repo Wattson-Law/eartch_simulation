@@ -7,7 +7,8 @@ import type { EcosystemState } from './sim/types';
 import { parseCommand } from './nlp/parse';
 import { GlobeCanvas } from './ui/GlobeCanvas';
 import { EcoView } from './ui/EcoView';
-import { ChatPanel, initialChatMessages, type ChatMessage } from './ui/ChatPanel';
+import { ChatPanel } from './ui/ChatPanel';
+import { initialChatMessages, type ChatMessage } from './ui/chatMessages';
 import { Disclaimer } from './ui/Disclaimer';
 import { CausalCascadePanel } from './ui/CausalCascadePanel';
 import { AssetGallery } from './ui/AssetGallery';
@@ -47,6 +48,11 @@ export default function App() {
 
   useEffect(() => {
     const id = window.setInterval(() => {
+      // The globe is an entry scene, and a background tab is not an active
+      // field observation. Keep the deterministic ecosystem clock scoped to a
+      // visible Yellowstone session so waiting at the landing screen or
+      // switching tabs cannot silently drain the populations.
+      if (document.hidden || viewRef.current !== 'eco') return;
       setState((prev) => {
         if (prev.paused) return prev;
         return tick(prev);

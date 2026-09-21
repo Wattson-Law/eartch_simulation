@@ -9,7 +9,32 @@ import { tickCascades } from './cascade';
 // with one light state; explicit fast-forward commands can still move the
 // calendar quickly when the user asks for it.
 export const TICKS_PER_SEASON = 48;
-const PREDATION_REPORT_INTERVAL = 6;
+const PREDATION_REPORT_INTERVAL = 8;
+
+// Rates are tuned for a several-minute field observation. They keep the
+// simplified food chain visibly responsive while avoiding a demo that empties
+// the valley before a visitor can inspect all three panorama segments.
+const ECOLOGY = {
+  rabbitGrassRate: 0.017,
+  rabbitFoodDemand: 0.95,
+  elkGrassRate: 0.014,
+  elkGrassDemand: 2.2,
+  elkShrubRate: 0.018,
+  elkShrubDemand: 1.6,
+  elkFoodDemand: 3.9,
+  rabbitBirthRate: 0.055,
+  elkBirthRate: 0.026,
+  rabbitStarveRate: 0.016,
+  elkStarveRate: 0.012,
+  winterStress: 0.008,
+  winterPlantMultiplier: 0.25,
+  wolfPressure: 0.14,
+  rabbitPreyRate: 0.035,
+  elkPreyRate: 0.018,
+  wolfFoodDemand: 0.3,
+  wolfBirthRate: 0.02,
+  wolfStarveRate: 0.01,
+} as const;
 
 /** 季节基准温度与降雨 */
 const SEASON_CLIMATE: Record<Season, { temp: number; rain: number }> = {
@@ -74,27 +99,27 @@ export function tick(state: EcosystemState): EcosystemState {
   const plantFactor = plantGrowthFactor(s);
   const grassGrowth = s.grass * 0.04 * plantFactor + 15 * plantFactor;
   const shrubGrowth = s.shrubs * 0.025 * plantFactor + 8 * plantFactor;
-  const winterMul = s.season === 'winter' ? 0.15 : 1;
+  const winterPlantMultiplier = s.season === 'winter' ? ECOLOGY.winterPlantMultiplier : 1;
   s = {
     ...s,
-    grass: s.grass + grassGrowth * winterMul,
-    shrubs: s.shrubs + shrubGrowth * winterMul,
+    grass: s.grass + grassGrowth * winterPlantMultiplier,
+    shrubs: s.shrubs + shrubGrowth * winterPlantMultiplier,
   };
 
   // —— 草食动物：消耗植物并繁殖 ——
-  const rabbitEat = Math.min(s.grass * 0.02, s.rabbits * 1.2);
-  const elkEatGrass = Math.min(s.grass * 0.015, s.elk * 2.5);
-  const elkEatShrub = Math.min(s.shrubs * 0.02, s.elk * 1.8);
+  const rabbitEat = Math.min(s.grass * ECOLOGY.rabbitGrassRate, s.rabbits * ECOLOGY.rabbitFoodDemand);
+  const elkEatGrass = Math.min(s.grass * ECOLOGY.elkGrassRate, s.elk * ECOLOGY.elkGrassDemand);
+  const elkEatShrub = Math.min(s.shrubs * ECOLOGY.elkShrubRate, s.elk * ECOLOGY.elkShrubDemand);
 
-  const rabbitFood = rabbitEat / Math.max(1, s.rabbits * 1.2);
+  const rabbitFood = rabbitEat / Math.max(1, s.rabbits * ECOLOGY.rabbitFoodDemand);
   const elkFood =
-    (elkEatGrass + elkEatShrub) / Math.max(1, s.elk * 4.3);
+    (elkEatGrass + elkEatShrub) / Math.max(1, s.elk * ECOLOGY.elkFoodDemand);
 
-  const rabbitBirth = s.rabbits * 0.08 * Math.min(1.5, rabbitFood);
-  const elkBirth = s.elk * 0.035 * Math.min(1.3, elkFood);
-  const rabbitStarve = s.rabbits * 0.04 * Math.max(0, 1 - rabbitFood);
-  const elkStarve = s.elk * 0.03 * Math.max(0, 1 - elkFood);
-  const winterStress = s.season === 'winter' ? 0.025 : 0;
+  const rabbitBirth = s.rabbits * ECOLOGY.rabbitBirthRate * Math.min(1.5, rabbitFood);
+  const elkBirth = s.elk * ECOLOGY.elkBirthRate * Math.min(1.3, elkFood);
+  const rabbitStarve = s.rabbits * ECOLOGY.rabbitStarveRate * Math.max(0, 1 - rabbitFood);
+  const elkStarve = s.elk * ECOLOGY.elkStarveRate * Math.max(0, 1 - elkFood);
+  const winterStress = s.season === 'winter' ? ECOLOGY.winterStress : 0;
 
   s = {
     ...s,
@@ -105,18 +130,18 @@ export function tick(state: EcosystemState): EcosystemState {
   };
 
   // —— 狼捕食草食动物 ——
-  const wolfPressure = s.wolves * 0.35;
-  const rabbitPreyPool = s.rabbits * 0.08;
-  const elkPreyPool = s.elk * 0.04;
+  const wolfPressure = s.wolves * ECOLOGY.wolfPressure;
+  const rabbitPreyPool = s.rabbits * ECOLOGY.rabbitPreyRate;
+  const elkPreyPool = s.elk * ECOLOGY.elkPreyRate;
   const totalPreyPool = rabbitPreyPool + elkPreyPool + 0.001;
   const desiredKill = Math.min(wolfPressure, totalPreyPool);
 
   const rabbitKilled = desiredKill * (rabbitPreyPool / totalPreyPool);
   const elkKilled = desiredKill * (elkPreyPool / totalPreyPool);
 
-  const wolfFood = (rabbitKilled * 0.4 + elkKilled * 1.2) / Math.max(1, s.wolves * 0.5);
-  const wolfBirth = s.wolves * 0.02 * Math.min(1.2, wolfFood);
-  const wolfStarve = s.wolves * 0.03 * Math.max(0, 1 - wolfFood);
+  const wolfFood = (rabbitKilled * 0.4 + elkKilled * 1.2) / Math.max(1, s.wolves * ECOLOGY.wolfFoodDemand);
+  const wolfBirth = s.wolves * ECOLOGY.wolfBirthRate * Math.min(1.2, wolfFood);
+  const wolfStarve = s.wolves * ECOLOGY.wolfStarveRate * Math.max(0, 1 - wolfFood);
 
   // Population pressure is continuous, but a visible field observation is a
   // sampled event. Reporting every background consumption step made the log

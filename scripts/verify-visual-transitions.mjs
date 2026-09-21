@@ -13,6 +13,7 @@ assert.match(transition, /进入黄石生态区/, 'Eco arrival needs a readable 
 assert.match(app, /const arrival = window\.setTimeout\([^]*?, 380\)/, 'The globe must hold the orbital phase before swapping views');
 assert.match(app, /const finish = window\.setTimeout\([^]*?, 1180\)/, 'The arrival phase must have a bounded cleanup timer');
 assert.match(app, /clearTimeout\(timer\)/, 'Transition timers must be cancelled on cleanup and return');
+assert.match(app, /document\.hidden \|\| viewRef\.current !== 'eco'/, 'The ecosystem clock must pause outside a visible Yellowstone view');
 assert.match(scene, /advanceSeasonVisual\(visualSeason/, 'Season changes must use a continuous visual position');
 assert.match(scene, /approachVisual\(visualRain/, 'Rainfall must ease toward its target');
 assert.match(scene, /approachVisual\(visualFire/, 'Fire coverage must ease toward its target');
