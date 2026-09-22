@@ -1178,12 +1178,16 @@ function fireSafePoint(agent: WildlifeAgent) {
 }
 
 function speedFor(kind: WildlifeKind, activity: WildlifeActivity) {
-  if (activity === 'chase' || activity === 'flee') return kind === 'wolf' ? 0.24 : kind === 'deer' ? 0.22 : 0.18;
-  if (activity === 'hide') return kind === 'deer' ? 0.032 : kind === 'wolf' ? 0.028 : 0.04;
-  if (activity === 'emerge') return kind === 'rabbit' ? 0.045 : 0.035;
-  if (activity === 'stalk') return 0.032;
-  if (activity === 'drink' || activity === 'roam') return kind === 'wolf' ? 0.038 : 0.028;
-  if (activity === 'graze') return 0.016;
+  // Keep the field scene unhurried: routine travel should read as an animal
+  // choosing a route through grass, not as a sprite sliding across a stage.
+  // The chase/flee tier stays clearly faster so a predation beat still has a
+  // readable burst of urgency.
+  if (activity === 'chase' || activity === 'flee') return kind === 'wolf' ? 0.23 : kind === 'deer' ? 0.21 : 0.17;
+  if (activity === 'hide') return kind === 'deer' ? 0.028 : kind === 'wolf' ? 0.024 : 0.034;
+  if (activity === 'emerge') return kind === 'rabbit' ? 0.04 : 0.032;
+  if (activity === 'stalk') return 0.028;
+  if (activity === 'drink' || activity === 'roam') return kind === 'wolf' ? 0.033 : 0.024;
+  if (activity === 'graze') return 0.013;
   return 0;
 }
 
