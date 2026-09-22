@@ -2,6 +2,13 @@ import type { EcosystemState } from './types';
 
 export type WildlifeKind = 'rabbit' | 'deer' | 'wolf';
 
+/**
+ * Shared species labels and river geometry live here for the renderer. The
+ * former detailed wildlife world remains available for regression fixtures,
+ * but production Canvas updates use `visualSlice.ts` so this module's
+ * multi-agent behavior is not part of the runtime path.
+ */
+
 export type WildlifeActivity =
   | 'rest'
   | 'sit'

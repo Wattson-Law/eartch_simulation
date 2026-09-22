@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react';
 import type { EcosystemState } from '../sim/types';
+import { createVisualSlice, stepVisualSlice } from '../sim/visualSlice';
 import {
-  createWildlifeWorld,
-  stepWildlife,
   WILDLIFE_COVER_PATCHES,
   WILDLIFE_ACTIVITY_LABELS,
   WILDLIFE_LABELS,
@@ -978,7 +977,7 @@ export function EcoSceneCanvas({ state, onObservation, onStatus, onDayPhase }: P
     const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
     let animationSeconds = 0;
     let previousNow = t0;
-    const wildlife = createWildlifeWorld(stateRef.current);
+    const wildlife = createVisualSlice(stateRef.current);
     const visualPoses = new Map<string, VisualPose>();
     let visualSeason = seasonPosition(stateRef.current.season);
     const initialDayPhase = (stateRef.current as EcosystemState & { dayPhase?: SceneDayPhase }).dayPhase;
@@ -1654,7 +1653,7 @@ export function EcoSceneCanvas({ state, onObservation, onStatus, onDayPhase }: P
       const reducedMotion = motionQuery.matches;
       const motionDelta = !s.paused && !reducedMotion && !document.hidden ? delta : 0;
       animationSeconds += motionDelta;
-      stepWildlife(wildlife, motionDelta, s);
+      stepVisualSlice(wildlife, motionDelta, s);
       const requestedDayPhase = (s as EcosystemState & { dayPhase?: SceneDayPhase }).dayPhase;
       if (reducedMotion) {
         // Deliberate commands still need to be visible when the user asks for
@@ -1968,6 +1967,8 @@ export function EcoSceneCanvas({ state, onObservation, onStatus, onDayPhase }: P
             time: wildlife.time,
             observation: wildlife.observation,
             scene: {
+              visualMode: 'state-slice',
+              representativeCap: 1,
               sun: true,
               clouds: CLOUDS.length,
               fish: PANORAMA_FISH_ROUTES.length,

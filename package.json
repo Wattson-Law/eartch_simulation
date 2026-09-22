@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "test": "node scripts/verify-sprite-frame-math.mjs && node scripts/verify-wildlife.mjs && node scripts/verify-environment.mjs && node scripts/verify-visual-transitions.mjs && node scripts/verify-globe-projection.mjs && node scripts/verify-narrative.mjs",
+    "test": "node scripts/verify-sprite-frame-math.mjs && node scripts/verify-wildlife.mjs && node scripts/verify-visual-slice.mjs && node scripts/verify-environment.mjs && node scripts/verify-visual-transitions.mjs && node scripts/verify-globe-projection.mjs && node scripts/verify-narrative.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
