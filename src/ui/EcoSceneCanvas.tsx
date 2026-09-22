@@ -52,6 +52,7 @@ interface Props {
   state: EcosystemState;
   onObservation: (observation: WildlifeObservation) => void;
   onStatus?: (statuses: WildlifeStatus[]) => void;
+  onDayPhase?: (phase: SceneDayPhase) => void;
 }
 
 export interface WildlifeStatus {
@@ -917,12 +918,13 @@ function tooltipFor(hit: CritterHit): TooltipInfo {
 }
 
 /** 绘本风黄石场景（Canvas 2D，生成素材缺失时使用备用精灵）。 */
-export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
+export function EcoSceneCanvas({ state, onObservation, onStatus, onDayPhase }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const stateRef = useRef(state);
   const observationRef = useRef(onObservation);
   const statusRef = useRef(onStatus);
+  const dayPhaseRef = useRef(onDayPhase);
   const [tooltip, setTooltip] = useState<TooltipInfo | null>(null);
   const [cameraProgress, setCameraProgress] = useState(0);
   const cameraRef = useRef(0);
@@ -937,7 +939,8 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
     stateRef.current = state;
     observationRef.current = onObservation;
     statusRef.current = onStatus;
-  }, [state, onObservation, onStatus]);
+    dayPhaseRef.current = onDayPhase;
+  }, [state, onObservation, onStatus, onDayPhase]);
 
   useEffect(() => {
     const canvas = ref.current;
@@ -983,6 +986,7 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
     let visualRain = stateRef.current.rainfall;
     let visualFire = stateRef.current.fire ? 1 : 0;
     let lastObservation = '';
+    let lastDayPhase: SceneDayPhase | null = null;
     let lastUiUpdate = 0;
     const statusPriority: Record<WildlifeActivity, number> = {
       feed: 8,
@@ -1691,6 +1695,11 @@ export function EcoSceneCanvas({ state, onObservation, onStatus }: Props) {
 
       const palette = environmentPaletteAt(visualSeason, visualDay);
       const dayPalette = dayPaletteAt(visualDay);
+      const currentDayPhase = dayPhaseAt(visualDay);
+      if (currentDayPhase !== lastDayPhase) {
+        lastDayPhase = currentDayPhase;
+        dayPhaseRef.current?.(currentDayPhase);
+      }
       const rainOvercast = Math.max(0, Math.min(1, (visualRain - 0.45) / 0.55));
       const seasonCyclePosition = ((visualSeason % 4) + 4) % 4;
       const vegetationFilter = visualFire > 0.001

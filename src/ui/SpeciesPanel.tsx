@@ -83,7 +83,7 @@ export function SpeciesPanel({ state }: Props) {
 
   return (
     <div className="species-panel">
-      <div className="panel-title">黄石宏观生态</div>
+      <div className="panel-title">黄石宏观生态 <span className="panel-title-note">三位代表个体 · 全谷地数量</span></div>
       <div className="env-row">
         <span>季节：{SEASON_LABELS[state.season]}</span>
         <span>温度：{state.temperature}°C</span>

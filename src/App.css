@@ -273,6 +273,12 @@ button:focus-visible, input:focus-visible {
   font-size: 0.9rem;
   margin-bottom: 8px;
 }
+.panel-title-note {
+  margin-left: 5px;
+  color: #9aa38f;
+  font-size: .64rem;
+  font-weight: 500;
+}
 
 .env-row {
   display: flex;
@@ -665,6 +671,145 @@ button:focus-visible, input:focus-visible {
 .wildlife-status--pounce .wildlife-status__dot { background: #bd7657; box-shadow: 0 0 0 3px rgba(189, 118, 87, .16); }
 .wildlife-status--sit .wildlife-status__dot { background: #879b78; box-shadow: 0 0 0 3px rgba(135, 155, 120, .16); }
 .wildlife-status--caught .wildlife-status__dot { background: #9d6670; box-shadow: 0 0 0 3px rgba(157, 102, 112, .18); }
+
+/* —— 轻量巡护故事线：把昼夜与动物行为读成一段现场记录 —— */
+.field-story {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(220px, .85fr);
+  gap: 12px;
+  padding: 12px 13px;
+  border: 1px solid #e3dfc9;
+  border-radius: 13px;
+  background: linear-gradient(112deg, #fbfaf0 0%, #f4f7ec 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .72);
+}
+
+.field-story__main { min-width: 0; }
+.field-story__kicker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #7a8065;
+  font-size: .64rem;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.field-story__dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #b18651;
+  box-shadow: 0 0 0 3px rgba(177, 134, 81, .14);
+}
+.field-story__paused {
+  margin-left: 3px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #e6eee0;
+  color: #5f7358;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.field-story h3 {
+  margin: 4px 0 3px;
+  color: #2e3e30;
+  font-size: .98rem;
+  letter-spacing: .02em;
+}
+.field-story__main > p {
+  margin: 0;
+  color: #5f6654;
+  font-size: .76rem;
+  line-height: 1.5;
+}
+.field-story__focus {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-top: 8px;
+  color: #8a8d78;
+  font-size: .66rem;
+}
+.field-story__focus strong {
+  color: #89663d;
+  font-size: .72rem;
+  font-weight: 700;
+}
+.field-story__route {
+  min-width: 0;
+  align-self: center;
+  padding-left: 12px;
+  border-left: 1px solid #e2e1d1;
+}
+.field-story__route-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: #7a8065;
+  font-size: .64rem;
+}
+.field-story__route-head span:last-child {
+  color: #a06f43;
+  font-weight: 700;
+}
+.field-story__steps {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 3px;
+  margin-top: 13px;
+}
+.field-story__steps::before {
+  content: '';
+  position: absolute;
+  top: 4px;
+  left: 4%;
+  right: 4%;
+  height: 1px;
+  background: #d7dbc9;
+}
+.field-story__step {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  color: #969b89;
+  font-size: .62rem;
+  white-space: nowrap;
+}
+.field-story__step-dot {
+  width: 9px;
+  height: 9px;
+  border: 2px solid #d7dbc9;
+  border-radius: 50%;
+  background: #f6f7ee;
+}
+.field-story__step.is-past .field-story__step-dot {
+  border-color: #a6bc93;
+  background: #b7cba5;
+}
+.field-story__step.is-current {
+  color: #795c3a;
+  font-weight: 700;
+}
+.field-story__step.is-current .field-story__step-dot {
+  border-color: #9b713f;
+  background: #f3d9a0;
+  box-shadow: 0 0 0 3px rgba(155, 113, 63, .13);
+}
+.field-story__hint {
+  margin: 10px 0 0;
+  color: #8b907e;
+  font-size: .63rem;
+  line-height: 1.35;
+}
+
+@media (max-width: 700px) {
+  .field-story { grid-template-columns: 1fr; gap: 9px; }
+  .field-story__route { padding: 9px 0 0; border-top: 1px solid #e2e1d1; border-left: 0; }
+}
 
 /* —— 从宇宙入口进入黄石的短过渡 —— */
 .globe-to-eco-transition {

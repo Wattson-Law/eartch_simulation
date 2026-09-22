@@ -82,7 +82,10 @@ interface PendingPredation {
   tick: number;
 }
 
-const CAPS: Record<WildlifeKind, number> = { rabbit: 4, deer: 2, wolf: 2 };
+// The macro model still carries the full valley population. The canvas only
+// follows one representative individual per species so the scene can read as
+// a field note with a clear cast instead of a crowded animal showcase.
+const CAPS: Record<WildlifeKind, number> = { rabbit: 1, deer: 1, wolf: 1 };
 const WORLD_BOUNDS = { minX: 0.08, maxX: 0.93, minY: 0.61, maxY: 0.88 } as const;
 const MAX_DT = 1 / 60;
 const HUGE_DT = 1.2;
@@ -1049,7 +1052,7 @@ function updateObservation(world: WildlifeWorld) {
   if (!world.hunt) {
     const species = activeSpeciesText(world.agents);
     world.observation = {
-      text: species.length > 0 ? `${species}在草甸间恢复平静移动。` : '草甸暂时没有可见动物活动。',
+      text: species.length > 0 ? `${species}的代表个体沿各自的活动线恢复平静移动。` : '草甸暂时没有可见动物活动。',
       phase: 'quiet',
     };
     return;

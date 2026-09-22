@@ -153,8 +153,8 @@ function forceRecoverCaught(kind, position) {
   const world = createWildlifeWorld(s);
   assert.deepEqual(
     world.agents.reduce((counts, a) => ({ ...counts, [a.kind]: (counts[a.kind] ?? 0) + 1 }), {}),
-    { rabbit: 4, deer: 2, wolf: 2 },
-    'fixed representative caps are independent of viewport',
+    { rabbit: 1, deer: 1, wolf: 1 },
+    'one narrative representative per species is independent of viewport',
   );
   const macroBefore = { rabbits: s.rabbits, elk: s.elk, wolves: s.wolves };
   run(world, 20, s);
