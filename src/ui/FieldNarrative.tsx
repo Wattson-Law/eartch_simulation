@@ -68,6 +68,7 @@ const PHASE_ORDER: readonly SceneDayPhase[] = STORY_STEPS.map((step) => step.id)
 
 const ACTIVITY_PRIORITY: readonly WildlifeActivity[] = [
   'caught',
+  'feed',
   'pounce',
   'chase',
   'flee',
