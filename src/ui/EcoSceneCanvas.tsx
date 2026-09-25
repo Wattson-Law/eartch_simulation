@@ -1297,6 +1297,11 @@ export function EcoSceneCanvas({ state, onObservation, onStatus, onDayPhase }: P
         : kind === 'deer' && (activity === 'graze' || activity === 'drink') ? 'graze'
         : kind === 'rabbit' && activity === 'alert' ? 'alert'
         : kind === 'wolf' && activity === 'alert' && agent.activityTime > 1.2 ? 'howl' : 'idle';
+      // Once the manifest is available, never mix a ready generated animal
+      // with a legacy pixel fallback for a species whose canonical sheet is
+      // still in flight. Returning true skips the emoji/legacy branch below
+      // and leaves that representative hidden for a short loading window.
+      if (manifest && !generatedSheet(kind, action) && !generatedIdleSheet(kind)) return true;
       const current = sheetFor(kind, action);
       if (!current.img) return false;
       let pose = visualPoses.get(agent.id);
