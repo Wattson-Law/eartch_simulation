@@ -89,6 +89,15 @@ export function parseCommand(input: string): ParseResult {
   }
 
   // —— 情景注入芯片 / 叙事快捷指令 ——
+  if (/投喂草料|补充草料|喂草|草料车/.test(text)) {
+    return { ok: true, command: { type: 'campaign_decision', decision: 'feed_forage' }, matched: '投喂草料' };
+  }
+  if (/引入狼群|放归狼|释放狼|引狼/.test(text)) {
+    return { ok: true, command: { type: 'campaign_decision', decision: 'introduce_wolves' }, matched: '引入狼群' };
+  }
+  if (/人工隔离|隔离火线|修隔离带|部署隔离带/.test(text)) {
+    return { ok: true, command: { type: 'campaign_decision', decision: 'isolate_fire' }, matched: '人工隔离' };
+  }
   if (/暴风雪|暴雪|提前.*冬|深冬|寒潮/.test(text)) {
     return { ok: true, command: { type: 'force_season', season: 'winter' }, matched: '暴风雪提前' };
   }

@@ -1,9 +1,10 @@
-import type { EcosystemState, SimCommand, SpeciesKey } from './types';
+import type { CampaignDecision, EcosystemState, SimCommand, SpeciesKey } from './types';
 import { SEASON_LABELS, SPECIES_LABELS, SEASON_ORDER } from './types';
 import { clampState, BOUNDS } from './bounds';
 import { pushLog } from './state';
 import { TICKS_PER_SEASON, tick, tickMany } from './tick';
 import { enqueueFireCascade, enqueueWolfCascade } from './cascade';
+import { applyCampaignDecision, CAMPAIGN_DECISION_LABELS } from './campaign';
 
 export interface ApplyResult {
   state: EcosystemState;
@@ -187,6 +188,10 @@ export function applyCommand(state: EcosystemState, command: SimCommand): ApplyR
       };
     }
 
+    case 'campaign_decision': {
+      return applyCampaignDecisionCommand(state, command.decision);
+    }
+
     case 'query': {
       return handleQuery(state, command.about);
     }
@@ -196,6 +201,78 @@ export function applyCommand(state: EcosystemState, command: SimCommand): ApplyR
       return { state, reply: `这条指令我还不认识：${JSON.stringify(_exhaustive)}`, triggerPredationAnim: false };
     }
   }
+}
+
+function applyCampaignDecisionCommand(state: EcosystemState, decision: CampaignDecision): ApplyResult {
+  const registration = applyCampaignDecision(state.campaign, decision);
+  if (!registration.accepted) {
+    return {
+      state,
+      reply: registration.reason,
+      triggerPredationAnim: false,
+    };
+  }
+
+  let s: EcosystemState = { ...state, campaign: registration.campaign };
+  let reply = '';
+  if (decision === 'feed_forage') {
+    s = clampState({
+      ...s,
+      grass: s.grass + 360,
+      shrubs: s.shrubs + 140,
+      rabbits: s.rabbits + 8,
+      elk: s.elk + 4,
+    });
+    s = {
+      ...s,
+      campaign: {
+        ...s.campaign,
+        lastRadio: 'Lin：草料车已经到河岸了。先把饥饿的冬天撑过去，但别把投喂误当成生态恢复。',
+      },
+    };
+    reply = '投喂草料已记录：草场和灌丛获得一次小幅补给，食物链会继续按天自行演化。';
+  } else if (decision === 'introduce_wolves') {
+    const before = s.wolves;
+    s = clampState({ ...s, wolves: s.wolves + 8 });
+    const added = Math.round(s.wolves - before);
+    s = enqueueWolfCascade(s, `故事决策：引入 ${added} 只狼`);
+    s = {
+      ...s,
+      campaign: {
+        ...s.campaign,
+        lastRadio: 'Lin：运输笼打开了。狼群不会立刻修好河岸，但它们会改变赤鹿敢不敢停留的地方。',
+      },
+    };
+    reply = `引入狼群已记录：增加 ${added} 只灰狼。接下来观察啃食压力是否回到安全区间。`;
+  } else {
+    const wasBurning = s.fire;
+    s = clampState({
+      ...s,
+      fire: false,
+      fireTicksLeft: 0,
+      grass: wasBurning ? s.grass + 80 : s.grass,
+      shrubs: wasBurning ? s.shrubs + 40 : s.shrubs,
+    });
+    s = {
+      ...s,
+      campaign: {
+        ...s.campaign,
+        lastRadio: wasBurning
+          ? 'Lin：隔离带接上了，主火线熄下去。焦土还在，但河岸没有被整段吞掉。'
+          : 'Lin：隔离带先留在林缘。真正的火还没来，但你已经为第 60 天留下了选择。',
+      },
+    };
+    reply = wasBurning
+      ? '人工隔离已生效：火线停止，烧灼后的草和灌丛保留一小段恢复余地。'
+      : '人工隔离已部署：第 60 天野火到来时，火势会被削弱。';
+  }
+
+  s = pushLog(s, 'user-command', `第 ${s.campaign.day} 天 · 故事决策：${CAMPAIGN_DECISION_LABELS[decision]}。`);
+  return {
+    state: s,
+    reply,
+    triggerPredationAnim: false,
+  };
 }
 
 function mutateSpecies(

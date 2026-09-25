@@ -3,7 +3,8 @@ import { createInitialState } from './sim/state';
 import { tick } from './sim/tick';
 import { applyCommand } from './sim/commands';
 import { latestCascade } from './sim/cascade';
-import type { EcosystemState } from './sim/types';
+import type { CampaignDecision, EcosystemState } from './sim/types';
+import { CAMPAIGN_DECISION_LABELS } from './sim/campaign';
 import { parseCommand } from './nlp/parse';
 import { GlobeCanvas } from './ui/GlobeCanvas';
 import { EcoView } from './ui/EcoView';
@@ -120,6 +121,25 @@ export default function App() {
     }
   }, [beginEcoTransition, pushMessages]);
 
+  const handleCampaignDecision = useCallback((decision: CampaignDecision) => {
+    const result = applyCommand(stateRef.current, { type: 'campaign_decision', decision });
+    setState(result.state);
+    pushMessages(CAMPAIGN_DECISION_LABELS[decision], result.reply);
+    if (result.openCascade) setCascadeOpen(true);
+  }, [pushMessages]);
+
+  const restartCampaign = useCallback(() => {
+    const fresh = createInitialState();
+    setState(fresh);
+    setMessages(initialChatMessages());
+    msgIdRef.current = 2;
+    setCascadeOpen(false);
+    viewRef.current = 'eco';
+    transitionRef.current = 'idle';
+    setTransitionPhase('idle');
+    setView('eco');
+  }, []);
+
   const returnToGlobe = useCallback(() => {
     transitionTimersRef.current.forEach((timer) => window.clearTimeout(timer));
     transitionTimersRef.current = [];
@@ -156,6 +176,8 @@ export default function App() {
               onOpenCascade={() => setCascadeOpen(true)}
               hasCascade={cascade != null}
               onTogglePause={() => handleSend(state.paused ? '继续' : '暂停')}
+              onCampaignDecision={handleCampaignDecision}
+              onRestartCampaign={restartCampaign}
               entryTransition={transitionPhase === 'arrival'}
             />
           )}

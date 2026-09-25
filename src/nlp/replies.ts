@@ -3,7 +3,7 @@ import { SEASON_LABELS } from '../sim/types';
 
 /** 巡护员欢迎语（第一人称野外简报语气） */
 export const WELCOME_MESSAGE =
-  '你好，我是黄石巡护员 · Ranger Lin。我会把你的话记进巡护日志，再按谷里真实发生的天气、种群与猎场变化向你汇报——数字只来自现场仪表，我不会口头编造。\n试试：「暴风雪提前」「增加十只狼」「雷击野火」「现在谁最多」。';
+  '你好，我是黄石巡护员 · Ranger Lin。拉马谷只剩 100 天，春天会替我们检查这次营养级联是否成功。每一个决定都会写进电台日志，数字只来自现场仪表。\n你可以按下「投喂草料」「引入狼群」「人工隔离」，也可以试试：「现在谁最多」。';
 
 export const RANGER_NAME = '黄石巡护员 · Ranger Lin';
 export const RANGER_SHORT = '巡护员';

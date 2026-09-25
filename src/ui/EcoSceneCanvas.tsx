@@ -1631,12 +1631,19 @@ export function EcoSceneCanvas({ state, onObservation, onStatus, onDayPhase }: P
     };
 
     const plantCounts = (s: EcosystemState, fireStrength: number) => {
+      const tierScale = s.campaign?.vegetation === 'lush'
+        ? 1.2
+        : s.campaign?.vegetation === 'recovering'
+          ? 1.08
+          : s.campaign?.vegetation === 'burned'
+            ? 0.62
+            : 0.9;
       let treeN = Math.min(
         PLANT_CAP.trees,
-        Math.max(0, Math.ceil(s.shrubs / 450) + Math.ceil(s.grass / 4000)),
+        Math.max(0, Math.ceil((s.shrubs / 450 + s.grass / 4000) * tierScale)),
       );
-      let shrubN = Math.min(PLANT_CAP.shrubs, Math.max(0, Math.ceil(s.shrubs / 360)));
-      let grassN = Math.min(PLANT_CAP.grass, Math.max(0, Math.ceil(s.grass / 500)));
+      let shrubN = Math.min(PLANT_CAP.shrubs, Math.max(0, Math.ceil((s.shrubs / 360) * tierScale)));
+      let grassN = Math.min(PLANT_CAP.grass, Math.max(0, Math.ceil((s.grass / 500) * tierScale)));
       if (fireStrength > 0) {
         treeN = Math.max(0, Math.floor(treeN * (1 - fireStrength * 0.45)));
         shrubN = Math.max(0, Math.floor(shrubN * (1 - fireStrength * 0.5)));
@@ -1650,6 +1657,7 @@ export function EcoSceneCanvas({ state, onObservation, onStatus, onDayPhase }: P
       const delta = Math.min(0.1, Math.max(0, (now - previousNow) / 1000));
       previousNow = now;
       const s = stateRef.current;
+      const campaignVegetation = s.campaign?.vegetation ?? 'stressed';
       const reducedMotion = motionQuery.matches;
       const motionDelta = !s.paused && !reducedMotion && !document.hidden ? delta : 0;
       animationSeconds += motionDelta;
@@ -1701,7 +1709,7 @@ export function EcoSceneCanvas({ state, onObservation, onStatus, onDayPhase }: P
       }
       const rainOvercast = Math.max(0, Math.min(1, (visualRain - 0.45) / 0.55));
       const seasonCyclePosition = ((visualSeason % 4) + 4) % 4;
-      const vegetationFilter = visualFire > 0.001
+      const seasonalVegetationFilter = visualFire > 0.001
         ? `brightness(${1 - visualFire * 0.45}) sepia(${visualFire * 0.55}) saturate(${1 + visualFire * 0.2})`
         : palette.snow > 0.02
           ? `brightness(${1 + palette.snow * 0.08}) saturate(${1 - palette.snow * 0.5})`
@@ -1709,10 +1717,20 @@ export function EcoSceneCanvas({ state, onObservation, onStatus, onDayPhase }: P
             ? 'sepia(0.18) hue-rotate(-12deg) saturate(1.05)'
             : seasonCyclePosition > 0.8 && seasonCyclePosition < 1.8
               ? 'brightness(1.06) saturate(1.15)'
-              : 'none';
+              : '';
+      const campaignVegetationFilter = campaignVegetation === 'lush'
+        ? 'saturate(1.16) brightness(1.035)'
+        : campaignVegetation === 'recovering'
+          ? 'saturate(1.06)'
+          : campaignVegetation === 'burned'
+            ? 'sepia(.28) saturate(.72) brightness(.9)'
+            : 'saturate(.94)';
+      const vegetationFilter = [seasonalVegetationFilter, campaignVegetationFilter]
+        .filter(Boolean)
+        .join(' ');
       const ambientBrightness = 0.82 + dayPalette.ambientLight * 0.18;
       const ambientSaturation = 0.78 + dayPalette.ambientLight * 0.22;
-      const landscapeFilter = `${vegetationFilter === 'none' ? '' : `${vegetationFilter} `}brightness(${ambientBrightness}) saturate(${ambientSaturation})`.trim();
+      const landscapeFilter = `${vegetationFilter ? `${vegetationFilter} ` : ''}brightness(${ambientBrightness}) saturate(${ambientSaturation})`.trim();
       ctx.save();
       ctx.beginPath();
       ctx.rect(0, 0, w, h);
@@ -1990,6 +2008,15 @@ export function EcoSceneCanvas({ state, onObservation, onStatus, onDayPhase }: P
               visualFire,
               rainStrength: Math.max(0, Math.min(1, (visualRain - 0.45) / 0.55)),
               snowStrength: palette.snow,
+            },
+            campaign: {
+              day: s.campaign?.day ?? 1,
+              totalDays: s.campaign?.totalDays ?? 100,
+              act: s.campaign?.act ?? 'alarm',
+              vegetation: campaignVegetation,
+              cascadeSafeDays: s.campaign?.cascadeSafeDays ?? 0,
+              activeEvent: s.campaign?.activeEvent ?? null,
+              outcome: s.campaign?.outcome ?? null,
             },
             poses: [...visualPoses.entries()].map(([id, pose]) => ({ id, action: pose.action, blend: pose.blend, frame: pose.frame })),
             agents: wildlife.agents.map(({ id, kind, x, y, vx, vy, facing, heading, targetHeading, activity, gait, opacity, cover }) => ({ id, kind, x, y, vx, vy, facing, heading, targetHeading, activity, gait, opacity, cover })),

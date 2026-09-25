@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { EcosystemState } from '../sim/types';
+import type { CampaignDecision, EcosystemState } from '../sim/types';
 import type { WildlifeObservation } from '../sim/wildlife';
 import { SpeciesPanel } from './SpeciesPanel';
 import { PopulationChart } from './PopulationChart';
@@ -10,6 +10,7 @@ import { PredationAnimation } from './PredationAnimation';
 import { WILDLIFE_ACTIVITY_LABELS, WILDLIFE_LABELS, type WildlifeKind } from '../sim/wildlife';
 import { FieldNarrative } from './FieldNarrative';
 import { type SceneDayPhase } from './sceneEnvironment';
+import { CampaignPanel } from './CampaignPanel';
 
 interface Props {
   state: EcosystemState;
@@ -17,12 +18,23 @@ interface Props {
   onOpenCascade?: () => void;
   hasCascade?: boolean;
   onTogglePause: () => void;
+  onCampaignDecision: (decision: CampaignDecision) => void;
+  onRestartCampaign: () => void;
   entryTransition?: boolean;
 }
 
 const STATUS_ORDER: WildlifeKind[] = ['wolf', 'deer', 'rabbit'];
 
-export function EcoView({ state, onBack, onOpenCascade, hasCascade, onTogglePause, entryTransition = false }: Props) {
+export function EcoView({
+  state,
+  onBack,
+  onOpenCascade,
+  hasCascade,
+  onTogglePause,
+  onCampaignDecision,
+  onRestartCampaign,
+  entryTransition = false,
+}: Props) {
   const [observation, setObservation] = useState<WildlifeObservation>({ phase: 'quiet', text: '河谷安静下来，三位代表个体各自在草甸与林缘之间移动。' });
   const [statuses, setStatuses] = useState<WildlifeStatus[]>([]);
   const [dayPhase, setDayPhase] = useState<SceneDayPhase>('noon');
@@ -45,6 +57,7 @@ export function EcoView({ state, onBack, onOpenCascade, hasCascade, onTogglePaus
           </button>
         )}
       </div>
+      <CampaignPanel state={state} onDecision={onCampaignDecision} onRestart={onRestartCampaign} />
       <EcoSceneCanvas
         state={state}
         onObservation={setObservation}

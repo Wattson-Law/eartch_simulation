@@ -7,6 +7,40 @@ export type EventSource = 'system' | 'user-command' | 'predation';
 /** 物种键 */
 export type SpeciesKey = 'grass' | 'shrubs' | 'rabbits' | 'elk' | 'wolves';
 
+/**
+ * A short, deterministic field story layered on top of the macro simulator.
+ * The story owns pacing and presentation state; it never replaces the
+ * population variables below.
+ */
+export type CampaignAct = 'alarm' | 'storm' | 'verdict';
+export type CampaignEvent = 'blizzard' | 'wildfire';
+export type CampaignDecision = 'feed_forage' | 'introduce_wolves' | 'isolate_fire';
+export type VegetationTier = 'stressed' | 'recovering' | 'lush' | 'burned';
+export type CampaignOutcome =
+  | 'green_miracle'
+  | 'balanced_recovery'
+  | 'desertification'
+  | 'wolves_overrun';
+
+export interface CampaignState {
+  /** One-based story day. The opening radio call is Day 1. */
+  day: number;
+  totalDays: 100;
+  act: CampaignAct;
+  activeEvent: CampaignEvent | null;
+  lastEvent: CampaignEvent | null;
+  eventDays: { blizzard: number | null; wildfire: number | null };
+  decisions: Record<CampaignDecision, number>;
+  firebreakPrepared: boolean;
+  /** Consecutive days that satisfy the safe trophic-cascade conditions. */
+  cascadeSafeDays: number;
+  vegetation: VegetationTier;
+  outcome: CampaignOutcome | null;
+  completed: boolean;
+  lastRadio: string;
+  lastDecision: CampaignDecision | null;
+}
+
 /** 结构化用户/系统命令 */
 export type SimCommand =
   | { type: 'set_rain'; weeks: number }
@@ -19,7 +53,8 @@ export type SimCommand =
   | { type: 'resume' }
   | { type: 'fast_forward'; ticks: number }
   | { type: 'query'; about: 'most' | 'status' | 'why_rabbits' }
-  | { type: 'tourist_conflict' };
+  | { type: 'tourist_conflict' }
+  | { type: 'campaign_decision'; decision: CampaignDecision };
 
 /** 事件日志条目 */
 export interface LogEntry {
@@ -80,6 +115,8 @@ export interface EcosystemState {
   nextLogId: number;
   /** 叙事级联队列（不改种群数字） */
   causalQueue: CausalCascade[];
+  /** 固定 100 天故事层；数值引擎仍由 tick/applyCommand 独占写入。 */
+  campaign: CampaignState;
 }
 
 export const SEASON_LABELS: Record<Season, string> = {

@@ -59,48 +59,48 @@ const VISUAL_MAX_CATCHUP = 1.2;
 const TRACKS: Record<WildlifeKind, readonly { x: number; y: number }[]> = {
   rabbit: [
     { x: 0.24, y: 0.7 },
-    { x: 0.3, y: 0.7 },
-    { x: 0.32, y: 0.72 },
-    { x: 0.18, y: 0.68 },
+    { x: 0.265, y: 0.7 },
+    { x: 0.28, y: 0.71 },
+    { x: 0.22, y: 0.69 },
   ],
   deer: [
     { x: 0.7, y: 0.8 },
-    { x: 0.72, y: 0.82 },
-    { x: 0.82, y: 0.85 },
-    { x: 0.74, y: 0.8 },
+    { x: 0.72, y: 0.81 },
+    { x: 0.76, y: 0.82 },
+    { x: 0.73, y: 0.8 },
   ],
   wolf: [
     { x: 0.9, y: 0.74 },
-    { x: 0.82, y: 0.72 },
-    { x: 0.9, y: 0.68 },
-    { x: 0.88, y: 0.7 },
+    { x: 0.87, y: 0.72 },
+    { x: 0.9, y: 0.7 },
+    { x: 0.89, y: 0.71 },
   ],
 };
 
 const BEATS: Record<WildlifeKind, readonly VisualBeat[]> = {
   rabbit: [
-    { activity: 'hide', duration: 4.2 },
-    { activity: 'emerge', duration: 2.8, move: true },
-    { activity: 'graze', duration: 6.4 },
-    { activity: 'sit', duration: 4.6 },
-    { activity: 'roam', duration: 8.2, move: true },
+    { activity: 'hide', duration: 6.4 },
+    { activity: 'emerge', duration: 4.2, move: true },
+    { activity: 'graze', duration: 9.6 },
+    { activity: 'sit', duration: 8 },
+    { activity: 'roam', duration: 11, move: true },
   ],
   deer: [
-    { activity: 'graze', duration: 7.4 },
-    { activity: 'rest', duration: 4.8 },
-    { activity: 'drink', duration: 5.6, move: true },
-    { activity: 'roam', duration: 8.8, move: true },
-    { activity: 'sit', duration: 4.2 },
+    { activity: 'graze', duration: 10 },
+    { activity: 'rest', duration: 8 },
+    { activity: 'drink', duration: 7, move: true },
+    { activity: 'roam', duration: 11, move: true },
+    { activity: 'sit', duration: 8 },
   ],
   wolf: [
-    { activity: 'rest', duration: 5.4 },
-    { activity: 'roam', duration: 9.2, move: true },
-    { activity: 'alert', duration: 3.8 },
-    { activity: 'sit', duration: 5.2 },
+    { activity: 'rest', duration: 8 },
+    { activity: 'roam', duration: 12, move: true },
+    { activity: 'alert', duration: 6 },
+    { activity: 'sit', duration: 8 },
   ],
 };
 
-const SPEEDS: Record<WildlifeKind, number> = { rabbit: 0.014, deer: 0.011, wolf: 0.015 };
+const SPEEDS: Record<WildlifeKind, number> = { rabbit: 0.009, deer: 0.008, wolf: 0.009 };
 const SEASON_SPEED: Record<Season, number> = {
   spring: 1,
   summer: 1.05,

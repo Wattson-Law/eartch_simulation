@@ -3,6 +3,10 @@ import { SEASON_ORDER, SEASON_LABELS } from './types';
 import { clampState } from './bounds';
 import { appendHistory, pushLog } from './state';
 import { tickCascades } from './cascade';
+import {
+  advanceCampaign,
+  type CampaignMetrics,
+} from './campaign';
 
 // The UI advances one macro tick every 1.8 seconds. Keeping a season on the
 // screen for roughly a minute and a half lets a camera pan read as one place
@@ -49,7 +53,7 @@ const SEASON_CLIMATE: Record<Season, { temp: number; rain: number }> = {
  * 顺序：季节/气候 → 火灾衰减 → 植物 → 草食 → 捕食 → 夹紧 → 历史 → 日志 → 叙事级联。
  */
 export function tick(state: EcosystemState): EcosystemState {
-  if (state.paused) return state;
+  if (state.paused || state.campaign.completed) return state;
 
   let s: EcosystemState = {
     ...state,
@@ -174,6 +178,48 @@ export function tick(state: EcosystemState): EcosystemState {
     );
   }
 
+  // The story clock is deliberately downstream from the ecology calculation.
+  // It can announce a fixed event and return a visual/numeric effect, but it
+  // never becomes a second population engine.
+  const campaignMetrics: CampaignMetrics = {
+    grass: s.grass,
+    shrubs: s.shrubs,
+    rabbits: s.rabbits,
+    elk: s.elk,
+    wolves: s.wolves,
+    fire: s.fire,
+  };
+  const campaignStep = advanceCampaign(s.campaign, campaignMetrics);
+  s = { ...s, campaign: campaignStep.campaign };
+  if (campaignStep.event === 'blizzard') {
+    s = applyBlizzardEffect(s);
+    s = pushLog(
+      s,
+      'system',
+      '第 30 天 · 暴风雪提前：积雪压低草场，赤鹿被迫靠近林缘，巡护站进入应急观察。',
+    );
+  } else if (campaignStep.event === 'wildfire') {
+    s = applyWildfireEffect(s, campaignStep.campaign.firebreakPrepared);
+    s = pushLog(
+      s,
+      'system',
+      campaignStep.campaign.firebreakPrepared
+        ? '第 60 天 · 雷击野火：隔离带截住了主火线，火情仍在，但河岸保住了一部分。'
+        : '第 60 天 · 雷击野火：林缘起火，河岸植被进入烧灼与恢复阶段。',
+    );
+  }
+  if (campaignStep.completedNow) {
+    s = {
+      ...s,
+      paused: true,
+    };
+    s = pushLog(
+      s,
+      'system',
+      `第 100 天 · 春天裁决：${s.campaign.outcome ?? 'balanced_recovery'}。拉马谷的观测窗口结束。`,
+    );
+  }
+
   s = clampState(s);
   s = {
     ...s,
@@ -189,6 +235,30 @@ export function tick(state: EcosystemState): EcosystemState {
   s = appendHistory(s);
   s = tickCascades(s);
   return s;
+}
+
+function applyBlizzardEffect(state: EcosystemState): EcosystemState {
+  return clampState({
+    ...state,
+    temperature: state.temperature - 8,
+    rainfall: state.rainfall + 0.16,
+    grass: state.grass * 0.88,
+    shrubs: state.shrubs * 0.92,
+    rabbits: state.rabbits * 0.93,
+    elk: state.elk * 0.96,
+  });
+}
+
+function applyWildfireEffect(state: EcosystemState, hasFirebreak: boolean): EcosystemState {
+  const grassLoss = hasFirebreak ? 0.1 : 0.2;
+  const shrubLoss = hasFirebreak ? 0.08 : 0.16;
+  return clampState({
+    ...state,
+    fire: true,
+    fireTicksLeft: hasFirebreak ? 3 : 5,
+    grass: state.grass * (1 - grassLoss),
+    shrubs: state.shrubs * (1 - shrubLoss),
+  });
 }
 
 function plantGrowthFactor(s: EcosystemState): number {

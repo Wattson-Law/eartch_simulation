@@ -1,5 +1,6 @@
 import type { EcosystemState, HistoryPoint } from './types';
 import { clampState } from './bounds';
+import { createCampaignState } from './campaign';
 
 export function createInitialState(): EcosystemState {
   const base: EcosystemState = {
@@ -20,6 +21,7 @@ export function createInitialState(): EcosystemState {
     lastPredation: null,
     nextLogId: 1,
     causalQueue: [],
+    campaign: createCampaignState(),
   };
 
   const withLog = pushLog(

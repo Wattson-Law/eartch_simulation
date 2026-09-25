@@ -9,12 +9,12 @@ interface Props {
 }
 
 const SCENARIO_CHIPS = [
-  { label: '暴风雪提前', text: '暴风雪提前', tone: 'winter' as const },
-  { label: '雷击野火', text: '雷击野火', tone: 'fire' as const },
-  { label: '游客投喂冲突', text: '游客投喂冲突', tone: 'tourist' as const },
+  { label: '投喂草料', text: '投喂草料', tone: 'forage' as const },
+  { label: '引入狼群', text: '引入狼群', tone: 'wolves' as const },
+  { label: '人工隔离', text: '人工隔离', tone: 'isolate' as const },
 ];
 
-const QUICK_CHIPS = ['增加十只狼', '下雨', '现在谁最多'];
+const QUICK_CHIPS = ['暴风雪提前', '雷击野火', '现在谁最多'];
 
 export function ChatPanel({ messages, onSend, disabled }: Props) {
   const [input, setInput] = useState('');
@@ -57,7 +57,7 @@ export function ChatPanel({ messages, onSend, disabled }: Props) {
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="对巡护员说：暴风雪提前、增加十只狼…"
+          placeholder="对巡护员说：投喂草料、引入狼群、人工隔离…"
           disabled={disabled}
           aria-label="指令输入"
         />
@@ -66,7 +66,7 @@ export function ChatPanel({ messages, onSend, disabled }: Props) {
         </button>
       </form>
       <div className="scenario-chips">
-        <div className="scenario-label">情景注入</div>
+        <div className="scenario-label">100 天应急决策</div>
         <div className="scenario-row">
           {SCENARIO_CHIPS.map((s) => (
             <button

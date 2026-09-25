@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { EcosystemState } from '../sim/types';
 import { SEASON_LABELS } from '../sim/types';
+import { CAMPAIGN_ACT_LABELS, CAMPAIGN_OUTCOME_LABELS } from '../sim/campaign';
 import { ANIMAL_SHEETS, PLANT_THUMBS, loadEcosystemManifest, loadImage, type ScenePropMeta, type SheetMeta } from '../assetsPaths';
 
 interface Props {
@@ -88,9 +89,11 @@ export function SpeciesPanel({ state }: Props) {
         <span>季节：{SEASON_LABELS[state.season]}</span>
         <span>温度：{state.temperature}°C</span>
         <span>降雨：{state.rainfall.toFixed(2)}</span>
-        <span>步数：{state.tick}</span>
+        <span>故事：Day {state.campaign.day}/{state.campaign.totalDays}</span>
+        <span>{CAMPAIGN_ACT_LABELS[state.campaign.act]}</span>
         {state.fire && <span className="fire-badge">🔥 火灾中 ({state.fireTicksLeft})</span>}
         {state.paused && <span className="pause-badge">⏸ 暂停</span>}
+        {state.campaign.outcome && <span className="outcome-badge">{CAMPAIGN_OUTCOME_LABELS[state.campaign.outcome]}</span>}
       </div>
       <div className="species-grid">
         {rows.map((r) => (
