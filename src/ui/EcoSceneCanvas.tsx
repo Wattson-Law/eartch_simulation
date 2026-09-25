@@ -1006,6 +1006,7 @@ export function EcoSceneCanvas({ state, onObservation, onStatus, onDayPhase }: P
 
     const sheets: Partial<Record<keyof typeof ANIMAL_SHEETS, HTMLImageElement>> = {};
     const generatedSheets: Partial<Record<string, { img: HTMLImageElement; meta: SheetMeta }>> = {};
+    const generatedIdleSheets: Partial<Record<EcosystemAnimal, { img: HTMLImageElement; meta: SheetMeta }>> = {};
     const generatedProps: { id: string; meta: ScenePropMeta; img: HTMLImageElement }[] = [];
     const generatedLayers: Partial<Record<SceneLayerKey, HTMLImageElement>> = {};
     let manifest: EcosystemManifest | null = null;
@@ -1018,8 +1019,9 @@ export function EcoSceneCanvas({ state, onObservation, onStatus, onDayPhase }: P
     };
 
     void (async () => {
-      // Start legacy loads immediately so a slow generated pack never leaves
-      // the scene without animals during its first paint.
+      // Keep the old sheets as an emergency fallback only. The generated
+      // Yellowstone pack remains the canonical visual language whenever any
+      // part of it is available.
       const entries = Object.entries(ANIMAL_SHEETS) as [
         keyof typeof ANIMAL_SHEETS,
         SheetMeta,
@@ -1080,9 +1082,11 @@ export function EcoSceneCanvas({ state, onObservation, onStatus, onDayPhase }: P
             const meta = manifest?.animals[animal]?.[action];
             if (!meta) return;
             try {
-              generatedSheets[`${animal}:${action}`] = { img: await loadImage(meta.src), meta };
+              const loaded = { img: await loadImage(meta.src), meta };
+              generatedSheets[`${animal}:${action}`] = loaded;
+              if (action === 'idle') generatedIdleSheets[animal] = loaded;
             } catch {
-              /* old ScratchIO sheet remains the fallback */
+              /* The generated idle sheet below remains the style-safe fallback. */
             }
           }),
         );
@@ -1100,6 +1104,11 @@ export function EcoSceneCanvas({ state, onObservation, onStatus, onDayPhase }: P
     const generatedSheet = (kind: WildlifeKind, action: EcosystemAction) => {
       const animal: EcosystemAnimal = kind === 'deer' ? 'elk' : kind;
       return generatedSheets[`${animal}:${action}`];
+    };
+
+    const generatedIdleSheet = (kind: WildlifeKind) => {
+      const animal: EcosystemAnimal = kind === 'deer' ? 'elk' : kind;
+      return generatedIdleSheets[animal];
     };
 
     const drawSkyMotion = (
@@ -1250,6 +1259,8 @@ export function EcoSceneCanvas({ state, onObservation, onStatus, onDayPhase }: P
     const sheetFor = (kind: WildlifeKind, action: EcosystemAction) => {
       const generated = generatedSheet(kind, action);
       if (generated) return generated;
+      const generatedIdle = generatedIdleSheet(kind);
+      if (generatedIdle) return generatedIdle;
       const prefix = kind === 'deer' ? 'elk' : kind;
       const key = `${prefix}${action[0].toUpperCase()}${action.slice(1)}` as keyof typeof ANIMAL_SHEETS;
       return { img: sheets[key], meta: ANIMAL_SHEETS[key] as SheetMeta };
