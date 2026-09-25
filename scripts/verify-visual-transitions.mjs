@@ -31,6 +31,8 @@ assert.match(scene, /const ambientDelta = !document\.hidden \? delta \* motionSc
 assert.match(scene, /drawCritterSheet\(target, agent, x, y, w, elapsed, ambientDelta\)/, 'Idle animal frames must keep breathing while ecology time is paused');
 assert.match(scene, /const generatedIdleSheets: Partial<Record<EcosystemAnimal/, 'Generated idle sheets must be retained for style-safe action fallback');
 assert.match(scene, /const generatedIdle = generatedIdleSheet\(kind\);/, 'Missing generated action sheets must fall back to the canonical generated idle art');
+assert.match(scene, /Start animal requests before the large panorama layers and props/, 'Animal art must begin loading before heavy scene layers');
+assert.match(scene, /void Promise\.all\(\s*generatedEntries\.map/, 'Animal art loading must run independently of the scene layer queue');
 assert.match(scene, /runtime: \{/, 'Development telemetry must expose animation runtime state');
 assert.match(css, /@keyframes transition-orbit-zoom/, 'Orbital handoff needs a zoom animation');
 assert.match(css, /@keyframes eco-view-arrival/, 'Eco view needs an arrival animation');

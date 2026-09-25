@@ -1039,6 +1039,38 @@ export function EcoSceneCanvas({ state, onObservation, onStatus, onDayPhase }: P
 
     void (async () => {
       manifest = await loadEcosystemManifest();
+      if (manifest) {
+        const generatedEntries: [EcosystemAnimal, EcosystemAction][] = [
+          ['wolf', 'idle'],
+          ['wolf', 'walk'],
+          ['wolf', 'run'],
+          ['wolf', 'howl'],
+          ['elk', 'idle'],
+          ['elk', 'walk'],
+          ['elk', 'run'],
+          ['elk', 'graze'],
+          ['rabbit', 'idle'],
+          ['rabbit', 'hop'],
+          ['rabbit', 'run'],
+          ['rabbit', 'alert'],
+        ];
+        // Start animal requests before the large panorama layers and props.
+        // Partial completion is useful: each generated sheet can replace the
+        // emergency legacy sprite as soon as it arrives.
+        void Promise.all(
+          generatedEntries.map(async ([animal, action]) => {
+            const meta = manifest?.animals[animal]?.[action];
+            if (!meta) return;
+            try {
+              const loaded = { img: await loadImage(meta.src), meta };
+              generatedSheets[`${animal}:${action}`] = loaded;
+              if (action === 'idle') generatedIdleSheets[animal] = loaded;
+            } catch {
+              /* The generated idle sheet remains the style-safe fallback. */
+            }
+          }),
+        );
+      }
       if (manifest?.scene?.layers) {
         await Promise.all(
           (Object.entries(manifest.scene.layers) as [SceneLayerKey, { src: string }][]) .map(async ([key, meta]) => {
@@ -1061,35 +1093,6 @@ export function EcoSceneCanvas({ state, onObservation, onStatus, onDayPhase }: P
           }),
         );
         generatedProps.sort((a, b) => a.id.localeCompare(b.id));
-      }
-      if (manifest) {
-        const generatedEntries: [EcosystemAnimal, EcosystemAction][] = [
-          ['wolf', 'idle'],
-          ['wolf', 'walk'],
-          ['wolf', 'run'],
-          ['wolf', 'howl'],
-          ['elk', 'idle'],
-          ['elk', 'walk'],
-          ['elk', 'run'],
-          ['elk', 'graze'],
-          ['rabbit', 'idle'],
-          ['rabbit', 'hop'],
-          ['rabbit', 'run'],
-          ['rabbit', 'alert'],
-        ];
-        await Promise.all(
-          generatedEntries.map(async ([animal, action]) => {
-            const meta = manifest?.animals[animal]?.[action];
-            if (!meta) return;
-            try {
-              const loaded = { img: await loadImage(meta.src), meta };
-              generatedSheets[`${animal}:${action}`] = loaded;
-              if (action === 'idle') generatedIdleSheets[animal] = loaded;
-            } catch {
-              /* The generated idle sheet below remains the style-safe fallback. */
-            }
-          }),
-        );
       }
       try {
         const loaded = await loadPlantImages();
