@@ -4,6 +4,14 @@
 
 > **本作品为简化互动科学玩具，不代表真实黄石生态预测。**
 
+## 在线演示
+
+推送到 `main` 后，GitHub Actions 会自动完成检查、构建并发布到 GitHub Pages：
+
+<https://wattson-law.github.io/eartch_simulation/>
+
+工作流文件为 `.github/workflows/deploy-pages.yml`。首次启用时，在仓库的 **Settings → Pages → Build and deployment** 将来源设为 **GitHub Actions**；之后每次 `main` 更新都会自动部署。
+
 ## 如何运行
 
 环境要求：Node.js 22.12+（也支持 20.19+ 的 20.x 分支）；本次验证使用 Node.js 22.18.0。

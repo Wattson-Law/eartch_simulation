@@ -58,22 +58,22 @@ const VISUAL_MAX_CATCHUP = 1.2;
 // one side of the river, so a scripted walk can never appear to cross water.
 const TRACKS: Record<WildlifeKind, readonly { x: number; y: number }[]> = {
   rabbit: [
-    { x: 0.24, y: 0.7 },
-    { x: 0.265, y: 0.7 },
-    { x: 0.28, y: 0.71 },
-    { x: 0.22, y: 0.69 },
+    { x: 0.15, y: 0.7 },
+    { x: 0.175, y: 0.7 },
+    { x: 0.19, y: 0.71 },
+    { x: 0.14, y: 0.69 },
   ],
   deer: [
-    { x: 0.7, y: 0.8 },
-    { x: 0.72, y: 0.81 },
-    { x: 0.76, y: 0.82 },
-    { x: 0.73, y: 0.8 },
+    { x: 0.245, y: 0.68 },
+    { x: 0.27, y: 0.69 },
+    { x: 0.3, y: 0.7 },
+    { x: 0.275, y: 0.68 },
   ],
   wolf: [
-    { x: 0.9, y: 0.74 },
-    { x: 0.87, y: 0.72 },
-    { x: 0.9, y: 0.7 },
-    { x: 0.89, y: 0.71 },
+    { x: 0.335, y: 0.69 },
+    { x: 0.315, y: 0.68 },
+    { x: 0.34, y: 0.7 },
+    { x: 0.33, y: 0.69 },
   ],
 };
 

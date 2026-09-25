@@ -450,7 +450,7 @@ function drawContinuousGeneratedRiver(
   ctx.strokeStyle = 'rgba(255,255,255,.28)';
   ctx.lineWidth = Math.max(0.7, h * 0.0015);
   for (let i = 0; i < 26; i++) {
-    const unitX = (seeded(i, 921) + elapsed * (0.0011 + (i % 4) * 0.0003)) % 1;
+    const unitX = (seeded(i, 921) + elapsed * (0.0028 + (i % 4) * 0.0007)) % 1;
     const profile = riverProfileAt(unitX);
     const x = unitX * w;
     const y = (profile.center + (seeded(i, 922) - 0.5) * profile.halfWidth * 1.25) * h;
@@ -1200,7 +1200,7 @@ export function EcoSceneCanvas({ state, onObservation, onStatus, onDayPhase }: P
             : rightOfSun;
         }
         const x = cameraX + safeCloudUnit * viewportW;
-        const y = entry.y * h + Math.sin(elapsed * 0.12 + index) * h * 0.002;
+        const y = entry.y * h + Math.sin(elapsed * 0.12 + index) * h * 0.004;
         const width = entry.width * viewportW;
         ctx.save();
         ctx.globalAlpha = entry.opacity * dayPalette.cloudAlpha * (1 - overcastStrength * 0.18);
@@ -1554,7 +1554,7 @@ export function EcoSceneCanvas({ state, onObservation, onStatus, onDayPhase }: P
         .map((prop, index) => {
         const [x, y] = PROP_ANCHORS[prop.id] ?? [0.5, 0.86];
         const plant = !['river-rocks', 'moss-rock'].includes(prop.id);
-        return { id: prop.id, img: prop.img, x: x * w, y: y * h, width: prop.meta.width * scale * (PROP_SCALE[prop.id] ?? 1), height: prop.meta.height * scale * (PROP_SCALE[prop.id] ?? 1), sway: plant ? Math.sin(elapsed * 0.8 + index * 0.9) * 0.014 : 0 };
+        return { id: prop.id, img: prop.img, x: x * w, y: y * h, width: prop.meta.width * scale * (PROP_SCALE[prop.id] ?? 1), height: prop.meta.height * scale * (PROP_SCALE[prop.id] ?? 1), sway: plant ? Math.sin(elapsed * 0.8 + index * 0.9) * 0.022 : 0 };
       });
       for (const patch of WILDLIFE_COVER_PATCHES) {
         const count = patch.id === 'left-tall-grass' ? 4 : 2;
@@ -1566,7 +1566,7 @@ export function EcoSceneCanvas({ state, onObservation, onStatus, onDayPhase }: P
           const y = patch.y + patch.ry * (0.38 + 0.12 * Math.sin(i * 2.3));
           const visitor = wildlife.agents.find((agent) => Math.hypot(agent.x - x, (agent.y - y) * 0.5625) < 0.065);
           const rustle = visitor ? Math.min(1, Math.hypot(visitor.vx, visitor.vy) / 0.06) * Math.sin(elapsed * 9 + i) * 0.045 : 0;
-          sprites.push({ id: `${patch.id}-${i}`, img: prop?.img, x: x * w, y: y * h, width: height * (prop ? prop.meta.width / prop.meta.height : 1.4), height, sway: Math.sin(elapsed * 1.1 + i * 0.7) * 0.018 + rustle });
+          sprites.push({ id: `${patch.id}-${i}`, img: prop?.img, x: x * w, y: y * h, width: height * (prop ? prop.meta.width / prop.meta.height : 1.4), height, sway: Math.sin(elapsed * 1.1 + i * 0.7) * 0.028 + rustle });
         }
       }
       return sprites.sort((a, b) => a.y - b.y);
@@ -1659,8 +1659,14 @@ export function EcoSceneCanvas({ state, onObservation, onStatus, onDayPhase }: P
       const s = stateRef.current;
       const campaignVegetation = s.campaign?.vegetation ?? 'stressed';
       const reducedMotion = motionQuery.matches;
-      const motionDelta = !s.paused && !reducedMotion && !document.hidden ? delta : 0;
-      animationSeconds += motionDelta;
+      // Keep the ecological clock and the presentation clock separate. A
+      // paused observation freezes population changes and scripted movement,
+      // while breathing, water, clouds and idle sprite frames can continue
+      // so the field does not look like a static screenshot.
+      const motionScale = reducedMotion ? 0.28 : 1;
+      const ambientDelta = !document.hidden ? delta * motionScale : 0;
+      const motionDelta = !s.paused ? ambientDelta : 0;
+      animationSeconds += ambientDelta;
       stepVisualSlice(wildlife, motionDelta, s);
       const requestedDayPhase = (s as EcosystemState & { dayPhase?: SceneDayPhase }).dayPhase;
       if (reducedMotion) {
@@ -1919,7 +1925,7 @@ export function EcoSceneCanvas({ state, onObservation, onStatus, onDayPhase }: P
           animalCtx.clearRect(0, 0, bufferW, bufferH);
           animalCtx.translate(-left, -top);
         }
-        if (!drawCritterSheet(target, agent, x, y, w, elapsed, motionDelta)) {
+        if (!drawCritterSheet(target, agent, x, y, w, elapsed, ambientDelta)) {
           target.save();
           target.globalAlpha = agent.opacity;
           target.font = `${drawnHeight * 0.7}px serif`;
@@ -2008,6 +2014,14 @@ export function EcoSceneCanvas({ state, onObservation, onStatus, onDayPhase }: P
               visualFire,
               rainStrength: Math.max(0, Math.min(1, (visualRain - 0.45) / 0.55)),
               snowStrength: palette.snow,
+            },
+            runtime: {
+              paused: s.paused,
+              reducedMotion,
+              documentHidden: document.hidden,
+              motionScale,
+              ambientDelta,
+              motionDelta,
             },
             campaign: {
               day: s.campaign?.day ?? 1,

@@ -241,11 +241,11 @@ export function rgba(rgb: SceneRgb, alpha = 1) {
   return `rgba(${Math.round(rgb[0])},${Math.round(rgb[1])},${Math.round(rgb[2])},${Math.max(0, Math.min(1, alpha))})`;
 }
 
-/** Continuous scene motion, driven by the same pausable clock as the animals. */
+/** Continuous scene motion, driven by the ambient presentation clock. */
 export const CLOUDS = [
-  { start: 0.22, y: 0.23, width: 0.17, speed: 0.0042, opacity: 0.88 },
-  { start: 0.73, y: 0.17, width: 0.23, speed: 0.006, opacity: 0.98 },
-  { start: 0.48, y: 0.09, width: 0.11, speed: 0.0027, opacity: 0.65 },
+  { start: 0.22, y: 0.23, width: 0.17, speed: 0.008, opacity: 0.88 },
+  { start: 0.73, y: 0.17, width: 0.23, speed: 0.011, opacity: 0.98 },
+  { start: 0.48, y: 0.09, width: 0.11, speed: 0.0055, opacity: 0.65 },
 ] as const;
 
 export function cloudPosition(index: number, seconds: number) {

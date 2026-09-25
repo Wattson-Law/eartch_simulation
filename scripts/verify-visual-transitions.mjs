@@ -26,6 +26,10 @@ assert.match(scene, /advanceDayVisual\(visualDay/, 'Daylight changes must use a 
 assert.match(scene, /dayPaletteAt\(visualDay\)/, 'Renderer must consume the day palette');
 assert.match(scene, /rainStrength/, 'Rain telemetry must expose a continuous intensity');
 assert.match(scene, /snowStrength/, 'Snow telemetry must expose a continuous intensity');
+assert.match(scene, /const motionScale = reducedMotion \? 0\.28 : 1/, 'Reduced-motion preference must slow presentation instead of freezing it');
+assert.match(scene, /const ambientDelta = !document\.hidden \? delta \* motionScale : 0/, 'Ambient presentation clock must stop only for hidden documents');
+assert.match(scene, /drawCritterSheet\(target, agent, x, y, w, elapsed, ambientDelta\)/, 'Idle animal frames must keep breathing while ecology time is paused');
+assert.match(scene, /runtime: \{/, 'Development telemetry must expose animation runtime state');
 assert.match(css, /@keyframes transition-orbit-zoom/, 'Orbital handoff needs a zoom animation');
 assert.match(css, /@keyframes eco-view-arrival/, 'Eco view needs an arrival animation');
 
