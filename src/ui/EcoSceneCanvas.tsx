@@ -1042,34 +1042,24 @@ export function EcoSceneCanvas({ state, onObservation, onStatus, onDayPhase }: P
       if (manifest) {
         const generatedEntries: [EcosystemAnimal, EcosystemAction][] = [
           ['wolf', 'idle'],
-          ['wolf', 'walk'],
-          ['wolf', 'run'],
-          ['wolf', 'howl'],
           ['elk', 'idle'],
-          ['elk', 'walk'],
-          ['elk', 'run'],
-          ['elk', 'graze'],
           ['rabbit', 'idle'],
-          ['rabbit', 'hop'],
-          ['rabbit', 'run'],
-          ['rabbit', 'alert'],
         ];
+        const loadGeneratedSheet = async ([animal, action]: [EcosystemAnimal, EcosystemAction]) => {
+          const meta = manifest?.animals[animal]?.[action];
+          if (!meta) return;
+          try {
+            const loaded = { img: await loadImage(meta.src), meta };
+            generatedSheets[`${animal}:${action}`] = loaded;
+            if (action === 'idle') generatedIdleSheets[animal] = loaded;
+          } catch {
+            /* The generated idle sheet remains the style-safe fallback. */
+          }
+        };
         // Start animal requests before the large panorama layers and props.
-        // Partial completion is useful: each generated sheet can replace the
-        // emergency legacy sprite as soon as it arrives.
-        void Promise.all(
-          generatedEntries.map(async ([animal, action]) => {
-            const meta = manifest?.animals[animal]?.[action];
-            if (!meta) return;
-            try {
-              const loaded = { img: await loadImage(meta.src), meta };
-              generatedSheets[`${animal}:${action}`] = loaded;
-              if (action === 'idle') generatedIdleSheets[animal] = loaded;
-            } catch {
-              /* The generated idle sheet remains the style-safe fallback. */
-            }
-          }),
-        );
+        // Only the three idle sheets compete with the first scene request;
+        // heavier action strips are scheduled after the panorama is ready.
+        void Promise.all(generatedEntries.map(loadGeneratedSheet));
       }
       if (manifest?.scene?.layers) {
         await Promise.all(
@@ -1081,6 +1071,29 @@ export function EcoSceneCanvas({ state, onObservation, onStatus, onDayPhase }: P
             }
           }),
         );
+      }
+      if (manifest) {
+        const deferredEntries: [EcosystemAnimal, EcosystemAction][] = [
+          ['wolf', 'walk'],
+          ['wolf', 'run'],
+          ['wolf', 'howl'],
+          ['elk', 'walk'],
+          ['elk', 'run'],
+          ['elk', 'graze'],
+          ['rabbit', 'hop'],
+          ['rabbit', 'run'],
+          ['rabbit', 'alert'],
+        ];
+        const loadDeferredSheet = async ([animal, action]: [EcosystemAnimal, EcosystemAction]) => {
+          const meta = manifest?.animals[animal]?.[action];
+          if (!meta) return;
+          try {
+            generatedSheets[`${animal}:${action}`] = { img: await loadImage(meta.src), meta };
+          } catch {
+            /* The idle sheet keeps the representative animal visible. */
+          }
+        };
+        void Promise.all(deferredEntries.map(loadDeferredSheet));
       }
       if (manifest?.props) {
         await Promise.all(
