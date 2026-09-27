@@ -126,7 +126,7 @@ export function CampaignPanel({ state, onDecision, onRestart }: Props) {
         <div className="campaign-decisions" aria-label="故事决策">
           <div className="campaign-decisions__head">
             <span>专员决策</span>
-            <small>每项只执行一次，后果留在 100 天里</small>
+            <small>{campaign.lastDecision ? '已执行一项，继续观察它留下的后果' : '先选一项，后果会留在 100 天里'}</small>
           </div>
           <div className="campaign-decisions__grid">
             {DECISIONS.map((decision) => {
@@ -149,6 +149,13 @@ export function CampaignPanel({ state, onDecision, onRestart }: Props) {
               );
             })}
           </div>
+          {campaign.lastDecision && (
+            <p className="campaign-decision-note" aria-live="polite">
+              <span>已写入巡护记录</span>
+              <strong>{CAMPAIGN_DECISION_LABELS[campaign.lastDecision]}</strong>
+              <em>模型会在接下来的天数里呈现它的影响。</em>
+            </p>
+          )}
         </div>
       )}
     </section>

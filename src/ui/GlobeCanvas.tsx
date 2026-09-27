@@ -280,6 +280,20 @@ export function GlobeCanvas({ onEnterYellowstone }: Props) {
           <button type="button" className="globe-control" onClick={() => controlsRef.current?.locate()}>定位黄石</button>
           <button type="button" className="enter-btn" onClick={onEnterYellowstone}>进入黄石生态区 <span aria-hidden="true">↗</span></button>
         </div>
+        <div className="globe-story-strip" aria-label="展品故事线索">
+          <div className="globe-story-item">
+            <strong>100 天</strong>
+            <span>一场春季评估</span>
+          </div>
+          <div className="globe-story-item">
+            <strong>3 位</strong>
+            <span>代表个体</span>
+          </div>
+          <div className="globe-story-item">
+            <strong>1 条河</strong>
+            <span>营养级联证据</span>
+          </div>
+        </div>
       </div>
     </div>
   );
