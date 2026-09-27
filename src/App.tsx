@@ -13,8 +13,9 @@ import './App.css';
 type View = 'globe' | 'eco' | 'assets';
 
 function initialView(): View {
-  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('view') === 'assets') {
-    return 'assets';
+  if (typeof window !== 'undefined') {
+    const requested = new URLSearchParams(window.location.search).get('view');
+    if (requested === 'assets' || requested === 'eco') return requested;
   }
   return 'globe';
 }

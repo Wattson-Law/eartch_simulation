@@ -1576,3 +1576,533 @@ button:focus-visible, input:focus-visible {
   color: #90a4ae;
   line-height: 1.4;
 }
+
+/* --------------------------------------------------------------------------
+   Exhibit visual pass
+   The ecology widgets remain available, but the first read is now the valley.
+   Keep these rules at the end so the older experiment panels can stay intact
+   while the public exhibit gets one coherent frame, type scale and palette.
+   -------------------------------------------------------------------------- */
+
+:root {
+  --exhibit-ink: #202b27;
+  --exhibit-muted: #6b766b;
+  --exhibit-paper: #f2efe5;
+  --exhibit-paper-deep: #e4e2d7;
+  --exhibit-line: #c9c8b9;
+  --exhibit-moss: #61765f;
+  --exhibit-copper: #ae7048;
+  --exhibit-night: #202a28;
+}
+
+body {
+  background: #e1e0d7;
+}
+
+.app-shell {
+  background: #e1e0d7;
+  color: var(--exhibit-ink);
+}
+
+.app-header {
+  padding: 14px clamp(16px, 3vw, 42px);
+  background: rgba(244, 242, 234, .94);
+  border-bottom: 1px solid #cbcbbd;
+  box-shadow: 0 1px 0 rgba(255,255,255,.7);
+}
+
+.brand {
+  gap: 10px;
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid #899183;
+  border-radius: 50%;
+  background: #d6ded2;
+  font-size: 20px;
+  filter: saturate(.78);
+}
+
+.brand h1 {
+  color: #26332d;
+  font-family: "Iowan Old Style", "Noto Serif SC", "Songti SC", serif;
+  font-size: 1.02rem;
+  letter-spacing: .025em;
+}
+
+.tagline {
+  color: #748071;
+  font-size: .72rem;
+}
+
+.disclaimer {
+  color: #685b4a;
+  background: #f1eadb;
+  border-color: #d6bd91;
+  border-radius: 5px;
+  font-size: .68rem;
+}
+
+.app-main--exhibit {
+  width: min(1440px, 100%);
+  padding: 18px clamp(10px, 2.3vw, 28px) 22px;
+}
+
+.stage {
+  border: 1px solid #cbcbbd;
+  border-radius: 20px;
+  background: var(--exhibit-paper);
+  box-shadow: 0 18px 50px rgba(42, 48, 41, .11);
+}
+
+.eco-view {
+  gap: 14px;
+  padding: clamp(12px, 2vw, 22px);
+  background: var(--exhibit-paper);
+}
+
+.eco-toolbar {
+  order: 0;
+  min-height: 42px;
+  padding: 1px 0 10px;
+  border-bottom: 1px solid var(--exhibit-line);
+}
+
+.eco-eyebrow {
+  color: #7b866f;
+  letter-spacing: .22em;
+  font-size: .56rem;
+}
+
+.eco-toolbar h2 {
+  color: var(--exhibit-ink);
+  font-family: "Iowan Old Style", "Noto Serif SC", "Songti SC", serif;
+  font-size: 1.2rem;
+  letter-spacing: .035em;
+}
+
+.back-btn,
+.pause-btn {
+  border-color: #b8c0ae;
+  border-radius: 5px;
+  background: transparent;
+  color: #435244;
+  font-size: .72rem;
+}
+
+.back-btn:hover,
+.pause-btn:hover,
+.pause-btn[aria-pressed="true"] {
+  background: #e0e6da;
+}
+
+.scene-stage {
+  position: relative;
+  order: 1;
+  width: 100%;
+  height: clamp(430px, 64vh, 720px);
+  min-height: 430px;
+  overflow: hidden;
+  border: 1px solid #8e9b8d;
+  border-radius: 13px;
+  background: #aebfc0;
+  box-shadow: 0 14px 30px rgba(47, 59, 49, .16), inset 0 1px 0 rgba(255,255,255,.35);
+  isolation: isolate;
+}
+
+.scene-stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(21, 39, 40, .07), transparent 22%, transparent 70%, rgba(23, 34, 27, .18));
+  mix-blend-mode: multiply;
+}
+
+.scene-stage .eco-scene-wrap {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  border-radius: 0;
+}
+
+.scene-stage .eco-scene-canvas {
+  border-radius: 0;
+}
+
+.scene-titleplate,
+.scene-state-chip {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+  color: #f2efe1;
+  text-shadow: 0 1px 8px rgba(15, 25, 24, .55);
+}
+
+.scene-titleplate {
+  left: 18px;
+  top: 18px;
+  display: grid;
+  gap: 3px;
+  padding: 8px 11px 9px;
+  border-left: 2px solid rgba(240, 219, 169, .78);
+  background: rgba(26, 39, 35, .34);
+  backdrop-filter: blur(4px);
+}
+
+.scene-titleplate__eyebrow {
+  color: #e3cf9f;
+  font-size: .55rem;
+  letter-spacing: .18em;
+}
+
+.scene-titleplate strong {
+  font-family: "Iowan Old Style", "Noto Serif SC", "Songti SC", serif;
+  font-size: 1.08rem;
+  font-weight: 650;
+}
+
+.scene-titleplate > span:last-child {
+  color: #d5ddd0;
+  font-size: .64rem;
+}
+
+.scene-state-chip {
+  top: 18px;
+  right: 18px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border: 1px solid rgba(235, 222, 182, .42);
+  border-radius: 999px;
+  background: rgba(26, 39, 35, .38);
+  color: #e8e5d8;
+  font-size: .61rem;
+  backdrop-filter: blur(4px);
+}
+
+.scene-state-chip__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #bbd18f;
+  box-shadow: 0 0 0 3px rgba(187, 209, 143, .16);
+}
+
+[data-campaign-event="blizzard"] .scene-state-chip__dot {
+  background: #b8d3e1;
+  box-shadow: 0 0 0 3px rgba(184, 211, 225, .2);
+}
+
+[data-campaign-event="wildfire"] .scene-state-chip__dot {
+  background: #e5a25e;
+  box-shadow: 0 0 0 3px rgba(229, 162, 94, .2);
+}
+
+.field-observation {
+  order: 2;
+  min-height: 40px;
+  padding: 7px 10px;
+  border: 1px solid var(--exhibit-line);
+  border-radius: 5px;
+  background: #e9e7dc;
+}
+
+.observation-label {
+  color: #6b765f;
+  font-size: .63rem;
+  letter-spacing: .04em;
+}
+
+.observation-text {
+  color: #4b574d;
+  font-size: .7rem;
+}
+
+.observation-dot {
+  background: var(--exhibit-moss);
+}
+
+.wildlife-status-strip {
+  order: 3;
+  margin-top: -3px;
+  gap: 8px;
+}
+
+.wildlife-status {
+  padding: 7px 10px;
+  border: 1px solid #c9cdbd;
+  border-radius: 4px;
+  background: #efeee6;
+  color: #5a675a;
+  font-size: .65rem;
+}
+
+.wildlife-status__activity {
+  color: #8d6b45;
+}
+
+.field-story {
+  order: 4;
+  padding: 12px 14px;
+  border: 1px solid var(--exhibit-line);
+  border-radius: 6px;
+  background: var(--exhibit-paper-deep);
+  box-shadow: none;
+}
+
+.field-story__kicker,
+.field-story__route-head {
+  color: #74806f;
+}
+
+.field-story h3 {
+  color: #27342b;
+  font-family: "Iowan Old Style", "Noto Serif SC", "Songti SC", serif;
+  font-size: 1.04rem;
+}
+
+.field-story__main > p {
+  color: #59645a;
+}
+
+.field-story__route {
+  border-left-color: #c4c6b6;
+}
+
+.field-story__step.is-current .field-story__step-dot {
+  border-color: #a16f44;
+  background: #ead6a7;
+}
+
+.campaign-panel {
+  order: 5;
+  padding: 14px 15px;
+  border: 1px solid #c9c8b9;
+  border-top: 3px solid #87967d;
+  border-radius: 6px;
+  background: #eeece2;
+  box-shadow: none;
+}
+
+.campaign-panel--storm {
+  border-top-color: #7f9daa;
+  background: #e9edeb;
+}
+
+.campaign-panel--verdict {
+  border-top-color: #b08250;
+  background: #f0ece1;
+}
+
+.campaign-panel__eyebrow,
+.campaign-verdict__eyebrow {
+  color: #827256;
+  letter-spacing: .16em;
+}
+
+.campaign-panel h3 {
+  color: #28372d;
+  font-family: "Iowan Old Style", "Noto Serif SC", "Songti SC", serif;
+  font-size: 1.02rem;
+}
+
+.campaign-day strong {
+  color: #394a3b;
+  font-size: 1.12rem;
+}
+
+.campaign-progress {
+  height: 4px;
+  background: #d3d7ca;
+}
+
+.campaign-progress > span {
+  background: #788f72;
+}
+
+.campaign-panel__body {
+  gap: 14px;
+}
+
+.campaign-objective {
+  color: #5b6658;
+}
+
+.campaign-meters {
+  color: #747e70;
+}
+
+.campaign-radio {
+  min-width: 260px;
+  border: 1px solid #788277;
+  border-radius: 4px;
+  background: var(--exhibit-night);
+  box-shadow: none;
+}
+
+.campaign-radio__head {
+  color: #b7c2b2;
+}
+
+.campaign-radio p {
+  color: #e0e1d4;
+}
+
+.campaign-decisions__head > span {
+  color: #4d5e4f;
+}
+
+.campaign-decisions__head small {
+  color: #858c7f;
+}
+
+.campaign-decision {
+  border-color: #c9cdbd;
+  border-radius: 4px;
+  background: #f4f1e7;
+}
+
+.campaign-decision:hover:not(:disabled) {
+  border-color: #8ea184;
+  background: #faf8ef;
+}
+
+.campaign-decision__icon {
+  filter: saturate(.62);
+}
+
+.campaign-decision__copy strong {
+  color: #3f5142;
+}
+
+.campaign-decision__copy small {
+  color: #788174;
+}
+
+.campaign-decision-note {
+  color: #7d887c;
+}
+
+.scene-caption {
+  order: 6;
+  margin: -5px 2px 0;
+  color: #7b8274;
+  font-size: .64rem;
+}
+
+.evidence-drawer {
+  order: 7;
+  border: 1px solid var(--exhibit-line);
+  border-radius: 6px;
+  background: #e7e5dc;
+  overflow: hidden;
+}
+
+.evidence-drawer > summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 13px;
+  cursor: pointer;
+  color: #3f5143;
+  font-size: .76rem;
+  font-weight: 700;
+  list-style-position: inside;
+}
+
+.evidence-drawer > summary::marker {
+  color: #9a704a;
+}
+
+.evidence-drawer > summary small {
+  color: #818a7b;
+  font-size: .62rem;
+  font-weight: 500;
+}
+
+.evidence-drawer__body {
+  display: grid;
+  gap: 12px;
+  padding: 0 12px 12px;
+}
+
+.evidence-drawer .species-panel,
+.evidence-drawer .chart-panel,
+.evidence-drawer .event-log {
+  border-color: #d1d1c4;
+  border-radius: 5px;
+  background: #f1f0e8;
+  box-shadow: none;
+}
+
+.evidence-drawer .panel-title {
+  color: #4c5b4d;
+  font-size: .78rem;
+}
+
+.app-footer {
+  padding: 4px clamp(16px, 3vw, 42px) 14px;
+}
+
+.footer-note {
+  color: #7a8477;
+  font-size: .66rem;
+}
+
+@media (max-width: 700px) {
+  .app-main--exhibit {
+    padding: 8px 8px 14px;
+  }
+
+  .eco-view {
+    padding: 10px;
+  }
+
+  .scene-stage {
+    height: min(66vh, 560px);
+    min-height: 360px;
+  }
+
+  .scene-titleplate {
+    left: 11px;
+    top: 11px;
+    padding: 6px 8px 7px;
+  }
+
+  .scene-titleplate strong {
+    font-size: .9rem;
+  }
+
+  .scene-state-chip {
+    top: 11px;
+    right: 11px;
+    font-size: .56rem;
+  }
+
+  .campaign-panel__body {
+    gap: 10px;
+  }
+
+  .evidence-drawer > summary {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scene-stage::after {
+    mix-blend-mode: normal;
+  }
+}

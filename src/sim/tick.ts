@@ -12,7 +12,7 @@ import {
 // screen for roughly a minute and a half lets a camera pan read as one place
 // with one light state; explicit fast-forward commands can still move the
 // calendar quickly when the user asks for it.
-export const TICKS_PER_SEASON = 48;
+export const TICKS_PER_SEASON = 60;
 const PREDATION_REPORT_INTERVAL = 8;
 
 // Rates are tuned for a several-minute field observation. They keep the
@@ -62,7 +62,9 @@ export function tick(state: EcosystemState): EcosystemState {
   };
 
   // —— 季节推进 ——
-  const seasonIndex = Math.floor(s.tick / TICKS_PER_SEASON) % 4;
+  // Day 1 starts in winter, thaw arrives around Day 60, and Day 100 still
+  // reads as an early-spring assessment rather than a second full season.
+  const seasonIndex = (Math.floor(s.tick / TICKS_PER_SEASON) + 3) % 4;
   const nextSeason = SEASON_ORDER[seasonIndex];
   const seasonChanged = nextSeason !== s.season;
   s = { ...s, season: nextSeason };

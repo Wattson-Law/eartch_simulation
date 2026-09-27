@@ -35,7 +35,12 @@ export function EcoView({
   const [statuses, setStatuses] = useState<WildlifeStatus[]>([]);
   const [dayPhase, setDayPhase] = useState<SceneDayPhase>('noon');
   return (
-    <div className={`eco-view${entryTransition ? ' eco-view--entering' : ''}`} data-entry-transition={entryTransition ? 'arrival' : 'idle'}>
+    <div
+      className={`eco-view${entryTransition ? ' eco-view--entering' : ''} eco-view--${state.campaign.act}`}
+      data-entry-transition={entryTransition ? 'arrival' : 'idle'}
+      data-campaign-event={state.campaign.activeEvent ?? 'quiet'}
+      data-vegetation={state.campaign.vegetation}
+    >
       <div className="eco-toolbar">
         <button type="button" className="back-btn" onClick={onBack}>
           ← 返回小地球
@@ -48,13 +53,25 @@ export function EcoView({
           {state.paused ? '继续观察' : '暂停观察'}
         </button>
       </div>
-      <CampaignPanel state={state} onDecision={onCampaignDecision} onRestart={onRestartCampaign} />
-      <EcoSceneCanvas
-        state={state}
-        onObservation={setObservation}
-        onStatus={setStatuses}
-        onDayPhase={setDayPhase}
-      />
+
+      <section className="scene-stage" aria-label="拉马谷现场观察">
+        <EcoSceneCanvas
+          state={state}
+          onObservation={setObservation}
+          onStatus={setStatuses}
+          onDayPhase={setDayPhase}
+        />
+        <div className="scene-titleplate">
+          <span className="scene-titleplate__eyebrow">FIELD OBSERVATION 04</span>
+          <strong>拉马谷 · Yellowstone</strong>
+          <span>{state.season === 'winter' ? '冬末' : state.season === 'spring' ? '春初' : state.season === 'summer' ? '盛夏' : '秋季'} · {dayPhase === 'dawn' ? '清晨' : dayPhase === 'morning' ? '上午' : dayPhase === 'noon' ? '中午' : dayPhase === 'evening' ? '傍晚' : '夜间'}</span>
+        </div>
+        <div className="scene-state-chip" aria-live="polite">
+          <span className="scene-state-chip__dot" />
+          {state.paused ? '观察已暂停' : state.campaign.activeEvent === 'wildfire' ? '林缘火情' : state.campaign.activeEvent === 'blizzard' ? '暴风雪观测' : '现场记录中'}
+        </div>
+      </section>
+
       <div className="wildlife-status-strip" aria-label="动物当前行为">
         {STATUS_ORDER.map((kind) => {
           const status = statuses.find((item) => item.kind === kind);
@@ -80,12 +97,21 @@ export function EcoView({
         tick={state.tick}
         paused={state.paused}
       />
-      <p className="scene-caption">拖动画面探索拉马谷 · 点选动物查看当前行为。故事线只组织观察顺序，不改动种群数字。</p>
-      <SpeciesPanel state={state} />
-      <div className="eco-bottom">
-        <PopulationChart history={state.history} />
-        <EventLog log={state.log} />
-      </div>
+      <CampaignPanel state={state} onDecision={onCampaignDecision} onRestart={onRestartCampaign} />
+      <p className="scene-caption">三位代表个体只负责让现场可见；下方证据记录整个拉马谷的数值变化。</p>
+      <details className="evidence-drawer">
+        <summary>
+          <span>观测证据</span>
+          <small>全谷地种群 · 事件简报</small>
+        </summary>
+        <div className="evidence-drawer__body">
+          <SpeciesPanel state={state} />
+          <div className="eco-bottom">
+            <PopulationChart history={state.history} />
+            <EventLog log={state.log} />
+          </div>
+        </div>
+      </details>
     </div>
   );
 }

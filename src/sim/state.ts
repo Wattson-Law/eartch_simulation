@@ -9,9 +9,13 @@ export function createInitialState(): EcosystemState {
     rabbits: 320,
     elk: 180,
     wolves: 24,
-    season: 'spring',
-    temperature: 12,
-    rainfall: 0.45,
+    // The exhibit opens in late winter and reaches its spring assessment
+    // inside the 100-day story window. The four-season model remains
+    // available for the command/NLP experiments, but the default exhibit
+    // now has a clear seasonal arc.
+    season: 'winter',
+    temperature: -3,
+    rainfall: 0.3,
     fire: false,
     fireTicksLeft: 0,
     tick: 0,
