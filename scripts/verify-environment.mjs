@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import ts from 'typescript';
 
 const source = await readFile(new URL('../src/ui/sceneEnvironment.ts', import.meta.url), 'utf8');
@@ -83,6 +83,20 @@ for (const route of FISH_ROUTES) {
   }
 }
 const manifest = JSON.parse(await readFile(new URL('../public/assets/ecosystem-v1/manifest.json', import.meta.url), 'utf8'));
+const packUrl = (src) => new URL(`../public/assets/ecosystem-v1/${src}`, import.meta.url);
+const webpSize = (buffer) => {
+  assert.equal(buffer.toString('ascii', 0, 4), 'RIFF', 'WebP asset must use a RIFF container');
+  assert.equal(buffer.toString('ascii', 8, 12), 'WEBP', 'Asset must decode as WebP');
+  assert.equal(buffer.toString('ascii', 12, 16), 'VP8X', 'Animated art needs the extended WebP header');
+  return [buffer.readUIntLE(24, 3) + 1, buffer.readUIntLE(27, 3) + 1];
+};
+for (const layer of Object.values(manifest.scene.layers)) {
+  assert.match(layer.src, /\.webp$/, 'Stage layers must use compact WebP assets on GitHub Pages');
+  const file = await stat(packUrl(layer.src));
+  assert.ok(file.size < 600_000, 'A stage layer is too large for the Pages first view');
+}
+for (const prop of Object.values(manifest.props)) await stat(packUrl(prop.src));
+await stat(packUrl(manifest.earth.atlas));
 let smoothClips = 0;
 for (const actions of Object.values(manifest.animals)) for (const [action, clip] of Object.entries(actions)) {
   if (action === 'idle') continue;
@@ -90,9 +104,9 @@ for (const actions of Object.values(manifest.animals)) for (const [action, clip]
   assert.equal(clip.frames / clip.fps, clip.source.frames / clip.source.fps, 'Interpolation must preserve cycle duration');
   assert.ok(clip.source.src.startsWith('animals/'), 'Rebuilding must not interpolate previously interpolated assets');
   assert.equal(clip.anchor.y, .91015625, 'Feet must retain the approved ground anchor');
-  const png = await readFile(new URL(`../public/assets/ecosystem-v1/${clip.src}`, import.meta.url));
-  assert.equal(png.readUInt32BE(16), clip.frameW * clip.frames, 'Sprite strip width disagrees with metadata');
-  assert.equal(png.readUInt32BE(20), clip.frameH, 'Sprite strip height disagrees with metadata');
+  const [width, height] = webpSize(await readFile(packUrl(clip.src)));
+  assert.equal(width, clip.frameW * clip.frames, 'Sprite strip width disagrees with metadata');
+  assert.equal(height, clip.frameH, 'Sprite strip height disagrees with metadata');
   smoothClips++;
 }
 assert.equal(smoothClips, 9);

@@ -1779,9 +1779,11 @@ export function EcoSceneCanvas({ state, onObservation, onStatus, onDayPhase }: P
       g.addColorStop(1, rgba(palette.skyBottom));
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, worldW, h);
-      const generatedLandscape = Boolean(
-        generatedLayers.mountains && generatedLayers.meadow && generatedLayers.river,
-      );
+      // Mountains and meadow are the geographic anchor. The river is drawn as
+      // one continuous animated ribbon below, so a single failed river image
+      // must not discard the rest of the approved scene artwork.
+      const generatedLandscape = Boolean(generatedLayers.mountains && generatedLayers.meadow);
+      canvas.dataset.sceneSource = generatedLandscape ? 'generated' : 'fallback';
       if (generatedLandscape) {
         // Use the approved Yellowstone art layers as the geographic anchor.
         // They are mirrored panel-by-panel so the river keeps its perspective

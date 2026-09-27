@@ -8,7 +8,7 @@
     "note": "AI raster artwork plus documented local compositing/animation. No external CC0 license inferred."
   },
   "earth": {
-    "atlas": "earth/rotation-atlas.png",
+    "atlas": "earth/rotation-atlas.webp",
     "frames": 48,
     "columns": 8,
     "rows": 6,
@@ -19,7 +19,7 @@
   "animals": {
     "wolf": {
       "idle": {
-        "src": "animals/wolf-idle.png",
+        "src": "animals/wolf-idle.webp",
         "frameW": 384,
         "frameH": 256,
         "frames": 8,
@@ -33,7 +33,7 @@
         "method": "Approved static character; local 0.6% breathing transform, not AI regenerated poses"
       },
       "walk": {
-        "src": "animals-smooth/wolf-walk.png",
+        "src": "animals-smooth/wolf-walk.webp",
         "frameW": 384,
         "frameH": 256,
         "frames": 32,
@@ -53,7 +53,7 @@
         }
       },
       "run": {
-        "src": "animals-smooth/wolf-run.png",
+        "src": "animals-smooth/wolf-run.webp",
         "frameW": 384,
         "frameH": 256,
         "frames": 32,
@@ -73,7 +73,7 @@
         }
       },
       "howl": {
-        "src": "animals-smooth/wolf-howl.png",
+        "src": "animals-smooth/wolf-howl.webp",
         "frameW": 384,
         "frameH": 256,
         "frames": 32,
@@ -95,7 +95,7 @@
     },
     "elk": {
       "idle": {
-        "src": "animals/elk-idle.png",
+        "src": "animals/elk-idle.webp",
         "frameW": 384,
         "frameH": 256,
         "frames": 8,
@@ -109,7 +109,7 @@
         "method": "Approved static character; local 0.6% breathing transform, not AI regenerated poses"
       },
       "walk": {
-        "src": "animals-smooth/elk-walk.png",
+        "src": "animals-smooth/elk-walk.webp",
         "frameW": 384,
         "frameH": 256,
         "frames": 32,
@@ -129,7 +129,7 @@
         }
       },
       "run": {
-        "src": "animals-smooth/elk-run.png",
+        "src": "animals-smooth/elk-run.webp",
         "frameW": 384,
         "frameH": 256,
         "frames": 32,
@@ -149,7 +149,7 @@
         }
       },
       "graze": {
-        "src": "animals-smooth/elk-graze.png",
+        "src": "animals-smooth/elk-graze.webp",
         "frameW": 384,
         "frameH": 256,
         "frames": 32,
@@ -171,7 +171,7 @@
     },
     "rabbit": {
       "idle": {
-        "src": "animals/rabbit-idle.png",
+        "src": "animals/rabbit-idle.webp",
         "frameW": 384,
         "frameH": 256,
         "frames": 8,
@@ -185,7 +185,7 @@
         "method": "Approved static character; local 0.6% breathing transform, not AI regenerated poses"
       },
       "hop": {
-        "src": "animals-smooth/rabbit-hop.png",
+        "src": "animals-smooth/rabbit-hop.webp",
         "frameW": 384,
         "frameH": 256,
         "frames": 32,
@@ -205,7 +205,7 @@
         }
       },
       "run": {
-        "src": "animals-smooth/rabbit-run.png",
+        "src": "animals-smooth/rabbit-run.webp",
         "frameW": 384,
         "frameH": 256,
         "frames": 32,
@@ -225,7 +225,7 @@
         }
       },
       "alert": {
-        "src": "animals-smooth/rabbit-alert.png",
+        "src": "animals-smooth/rabbit-alert.webp",
         "frameW": 384,
         "frameH": 256,
         "frames": 32,
@@ -251,90 +251,90 @@
     "height": 1152,
     "layers": {
       "sky": {
-        "src": "layers/sky-clear.png",
+        "src": "layers/sky-clear.webp",
         "alpha": false
       },
       "mountains": {
-        "src": "layers/mountains.png",
+        "src": "layers/mountains.webp",
         "alpha": true
       },
       "meadow": {
-        "src": "layers/meadow.png",
+        "src": "layers/meadow.webp",
         "alpha": true
       },
       "forestBack": {
-        "src": "layers/forest-back.png",
+        "src": "layers/forest-back.webp",
         "alpha": true
       },
       "river": {
-        "src": "layers/river.png",
+        "src": "layers/river.webp",
         "alpha": true
       },
       "foreground": {
-        "src": "layers/foreground.png",
+        "src": "layers/foreground.webp",
         "alpha": true
       }
     },
-    "waterMask": "layers/water-mask.png"
+    "waterMask": "layers/water-mask.webp"
   },
   "props": {
     "aspen": {
-      "src": "props/aspen.png",
+      "src": "props/aspen.webp",
       "width": 383,
       "height": 454
     },
     "cloud": {
-      "src": "props/cloud.png",
+      "src": "props/cloud.webp",
       "width": 476,
       "height": 241
     },
     "distant-pines": {
-      "src": "props/distant-pines.png",
+      "src": "props/distant-pines.webp",
       "width": 464,
       "height": 359
     },
     "golden-shrub": {
-      "src": "props/golden-shrub.png",
+      "src": "props/golden-shrub.webp",
       "width": 464,
       "height": 290
     },
     "grass-daisies": {
-      "src": "props/grass-daisies.png",
+      "src": "props/grass-daisies.webp",
       "width": 462,
       "height": 364
     },
     "grass-flowers": {
-      "src": "props/grass-flowers.png",
+      "src": "props/grass-flowers.webp",
       "width": 471,
       "height": 294
     },
     "moss-rock": {
-      "src": "props/moss-rock.png",
+      "src": "props/moss-rock.webp",
       "width": 482,
       "height": 290
     },
     "pine-cluster": {
-      "src": "props/pine-cluster.png",
+      "src": "props/pine-cluster.webp",
       "width": 429,
       "height": 426
     },
     "pine": {
-      "src": "props/pine.png",
+      "src": "props/pine.webp",
       "width": 255,
       "height": 485
     },
     "reeds": {
-      "src": "props/reeds.png",
+      "src": "props/reeds.webp",
       "width": 443,
       "height": 415
     },
     "river-rocks": {
-      "src": "props/river-rocks.png",
+      "src": "props/river-rocks.webp",
       "width": 480,
       "height": 258
     },
     "willow": {
-      "src": "props/willow.png",
+      "src": "props/willow.webp",
       "width": 462,
       "height": 328
     }

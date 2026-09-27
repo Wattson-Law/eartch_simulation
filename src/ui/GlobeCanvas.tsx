@@ -102,7 +102,7 @@ export function GlobeCanvas({ onEnterYellowstone }: Props) {
       textureSource = 'storybook-map';
       lastRenderedLongitude = NaN;
     };
-    void loadImage(assetUrl('assets/ecosystem-v1/earth/map.png')).then(installTexture).catch(() => { /* keep painted fallback */ });
+    void loadImage(assetUrl('assets/ecosystem-v1/earth/map.webp')).then(installTexture).catch(() => { /* keep painted fallback */ });
 
     const hotspot = () => {
       const point = projectLocation(YELLOWSTONE.longitude, YELLOWSTONE.latitude, longitude);
