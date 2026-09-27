@@ -15,8 +15,6 @@ import { CampaignPanel } from './CampaignPanel';
 interface Props {
   state: EcosystemState;
   onBack: () => void;
-  onOpenCascade?: () => void;
-  hasCascade?: boolean;
   onTogglePause: () => void;
   onCampaignDecision: (decision: CampaignDecision) => void;
   onRestartCampaign: () => void;
@@ -28,8 +26,6 @@ const STATUS_ORDER: WildlifeKind[] = ['wolf', 'deer', 'rabbit'];
 export function EcoView({
   state,
   onBack,
-  onOpenCascade,
-  hasCascade,
   onTogglePause,
   onCampaignDecision,
   onRestartCampaign,
@@ -51,11 +47,6 @@ export function EcoView({
         <button type="button" className="pause-btn" onClick={onTogglePause} aria-pressed={state.paused}>
           {state.paused ? '继续观察' : '暂停观察'}
         </button>
-        {hasCascade && onOpenCascade && (
-          <button type="button" className="cascade-open-btn" onClick={onOpenCascade}>
-            连锁影响
-          </button>
-        )}
       </div>
       <CampaignPanel state={state} onDecision={onCampaignDecision} onRestart={onRestartCampaign} />
       <EcoSceneCanvas
